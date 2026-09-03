@@ -129,57 +129,6 @@
     <p class="form-msg" id="entry-msg" role="status" aria-live="polite"></p>
   </section>
 
-  <!-- ── withings ────────────────────────────────────────────── -->
-  <section class="card" id="wcard">
-    <div class="card-head">
-      <div>
-        <h2>Withings sync</h2>
-        <p class="card-sub" id="w-sub">Checking…</p>
-      </div>
-      <div class="controls">
-        <button class="primary" id="w-link" hidden>Connect to Withings</button>
-        <button class="ghost" id="w-sync" hidden>Sync now</button>
-        <button class="ghost" id="w-unlink" hidden>Unlink</button>
-      </div>
-    </div>
-
-    <p class="banner err" id="w-err" hidden>
-      <span id="w-err-text"></span>
-      <button class="link-btn" id="w-err-x" aria-label="Dismiss">Dismiss</button>
-    </p>
-
-    <p class="fallback" id="w-fallback" hidden>
-      If no Withings tab opened, use this link:
-      <a id="w-authlink" href="#" target="_blank" rel="noopener noreferrer">open the Withings approval page</a>
-    </p>
-
-    <details id="w-setup">
-      <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
-      <ol class="steps">
-        <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
-        <li>Paste this as the callback URL, exactly:
-          <code class="block" id="w-redirect">—</code></li>
-        <li>Copy the client ID and secret it gives you into the boxes below. They are stored
-          in your local database and never leave this machine.</li>
-      </ol>
-      <form id="w-form" autocomplete="off">
-        <div class="field grow">
-          <label for="w-id">Client ID</label>
-          <input type="text" id="w-id" spellcheck="false" placeholder="…">
-        </div>
-        <div class="field grow">
-          <label for="w-secret">Client secret</label>
-          <input type="password" id="w-secret" spellcheck="false" placeholder="…">
-        </div>
-        <button type="submit" class="ghost">Save</button>
-        <p class="form-msg" id="w-saved-hint" hidden>
-          Saved on this machine. Leave the secret blank to keep the one already stored.
-        </p>
-      </form>
-    </details>
-    <p class="form-msg" id="w-msg" role="status" aria-live="polite"></p>
-  </section>
-
   <!-- ── stat tiles ──────────────────────────────────────────── -->
   <section class="tiles" id="tiles" aria-label="Summary">
     <div class="tile hero">
@@ -328,6 +277,52 @@
 
     <section class="pref-group">
       <h3>Withings</h3>
+
+      <div class="w-manage">
+        <span class="pref-label" id="w-sub">Checking…</span>
+        <div class="w-manage-btns">
+          <button class="ghost" id="w-sync" hidden>Sync now</button>
+          <button class="ghost" id="w-link" hidden>Connect to Withings</button>
+          <button class="ghost" id="w-unlink" hidden>Unlink</button>
+        </div>
+      </div>
+
+      <p class="banner err" id="w-err" hidden>
+        <span id="w-err-text"></span>
+        <button class="link-btn" id="w-err-x" aria-label="Dismiss">Dismiss</button>
+      </p>
+
+      <p class="fallback" id="w-fallback" hidden>
+        If no Withings tab opened, use this link:
+        <a id="w-authlink" href="#" target="_blank" rel="noopener noreferrer">open the Withings approval page</a>
+      </p>
+
+      <details id="w-setup">
+        <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
+        <ol class="steps">
+          <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
+          <li>Paste this as the callback URL, exactly:
+            <code class="block" id="w-redirect">—</code></li>
+          <li>Copy the client ID and secret it gives you into the boxes below. They are stored
+            in your local database and never leave this machine.</li>
+        </ol>
+        <form id="w-form" autocomplete="off">
+          <div class="field grow">
+            <label for="w-id">Client ID</label>
+            <input type="text" id="w-id" spellcheck="false" placeholder="…">
+          </div>
+          <div class="field grow">
+            <label for="w-secret">Client secret</label>
+            <input type="password" id="w-secret" spellcheck="false" placeholder="…">
+          </div>
+          <button type="submit" class="ghost">Save</button>
+          <p class="form-msg" id="w-saved-hint" hidden>
+            Saved on this machine. Leave the secret blank to keep the one already stored.
+          </p>
+        </form>
+      </details>
+      <p class="form-msg" id="w-msg" role="status" aria-live="polite"></p>
+
       <label class="pref" for="p-sync">
         <span class="pref-label">Sync automatically
           <small>How often to pull new weigh-ins in the background</small></span>

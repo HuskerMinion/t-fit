@@ -480,6 +480,15 @@ dialog.drawer::backdrop { background: #0009; }
 
 .pref-note { font-size: 12.5px; color: var(--ink-3); margin: 18px 0 0; line-height: 1.6; }
 
+/* Status plus every Withings action (sync, connect, unlink) — the whole
+   feature lives here in Settings, nothing on the main page. */
+.w-manage {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding: 2px 0 12px;
+}
+.w-manage .pref-label { font-size: 14px; font-weight: 500; color: var(--ink); }
+.w-manage-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* The goal as a path: start → target, then flat. Solid, because it's the
    line you're actually racing; the flat target reference stays dashed and
    recedes behind it. */

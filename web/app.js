@@ -791,10 +791,17 @@ function wire() {
 
 }
 
+/**
+ * `#w-sub` lives in Settings, right next to the buttons that act on it, so
+ * it just says where things stand — no need to point anywhere else.
+ */
 async function loadWithings() {
   let w;
   try { w = await api("/api/withings/status"); }
-  catch { $("#w-sub").textContent = "unavailable"; return false; }
+  catch {
+    $("#w-sub").textContent = "unavailable";
+    return false;
+  }
 
   $("#w-redirect").textContent = w.redirect_uri;
 
@@ -824,7 +831,7 @@ async function loadWithings() {
     setup.hidden = true;
   } else if (w.configured) {
     // Registered but not linked. The steps are done, so fold them away —
-    // Connect lives in the header now, so nothing gets hidden with them.
+    // Connect lives in this section's header now, not hidden with them.
     setup.hidden = false;
     setup.open = false;
     summary.textContent = "Registration details — open this to change the client ID or secret";
