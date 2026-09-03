@@ -37,10 +37,17 @@ fn find(headers: &csv::StringRecord, names: &[&str]) -> Option<usize> {
     })
 }
 
-/// Import a CSV. Recognises both our own export and a raw Withings
-/// `weight.csv`. When a day appears more than once, the earliest reading of
-/// that day wins — that's the morning weigh-in, which is the comparable one.
-pub fn import_csv(db: &Db, data: &str, source: Source, overwrite: bool) -> Result<ImportReport> {
+/// Import a CSV into one profile's log. Recognises both our own export and
+/// a raw Withings `weight.csv`. When a day appears more than once, the
+/// earliest reading of that day wins — that's the morning weigh-in, which
+/// is the comparable one.
+pub fn import_csv(
+    db: &Db,
+    user_id: i64,
+    data: &str,
+    source: Source,
+    overwrite: bool,
+) -> Result<ImportReport> {
     let mut rdr = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(data.as_bytes());
@@ -90,9 +97,9 @@ pub fn import_csv(db: &Db, data: &str, source: Source, overwrite: bool) -> Resul
 
     for e in best.values() {
         let changed = if overwrite {
-            db.upsert(e)?
+            db.upsert(user_id, e)?
         } else {
-            db.insert_if_absent(e)?
+            db.insert_if_absent(user_id, e)?
         };
         if changed {
             rep.inserted += 1;
@@ -107,34 +114,52 @@ pub fn import_csv(db: &Db, data: &str, source: Source, overwrite: bool) -> Resul
 mod tests {
     use super::*;
 
+    fn def_user(db: &Db) -> i64 {
+        db.users().unwrap()[0].id
+    }
+
     #[test]
     fn imports_our_own_export_with_memos() {
         let db = Db::open_in_memory().unwrap();
+        let u = def_user(&db);
         let csv = "date,weight_lb,memo\n2011-11-08,260.0,started Atkins\n2011-11-09,260.0,\n";
-        let r = import_csv(&db, csv, Source::Fitday, true).unwrap();
+        let r = import_csv(&db, u, csv, Source::Fitday, true).unwrap();
         assert_eq!(r.inserted, 2);
-        let all = db.entries().unwrap();
+        let all = db.entries(u).unwrap();
         assert_eq!(all[0].memo, "started Atkins");
     }
 
     #[test]
     fn imports_a_raw_withings_export_and_keeps_the_first_reading_of_a_day() {
         let db = Db::open_in_memory().unwrap();
+        let u = def_user(&db);
         let csv = "Date,\"Weight (lb)\",\"Fat mass (lb)\"\n\
                    \"2026-09-01 06:15:02\",268.9,105\n\
                    \"2026-09-01 21:40:00\",271.4,105\n";
-        let r = import_csv(&db, csv, Source::Withings, true).unwrap();
+        let r = import_csv(&db, u, csv, Source::Withings, true).unwrap();
         assert_eq!(r.inserted, 1);
-        assert!((db.entries().unwrap()[0].weight_lb - 268.9).abs() < 1e-9);
+        assert!((db.entries(u).unwrap()[0].weight_lb - 268.9).abs() < 1e-9);
     }
 
     #[test]
     fn sync_style_import_never_clobbers_a_hand_typed_day() {
         let db = Db::open_in_memory().unwrap();
-        import_csv(&db, "date,weight_lb,memo\n2026-09-01,268.9,mine\n", Source::Manual, true).unwrap();
-        import_csv(&db, "date,weight_lb\n2026-09-01,999.0\n", Source::Withings, false).unwrap();
-        let all = db.entries().unwrap();
+        let u = def_user(&db);
+        import_csv(&db, u, "date,weight_lb,memo\n2026-09-01,268.9,mine\n", Source::Manual, true).unwrap();
+        import_csv(&db, u, "date,weight_lb\n2026-09-01,999.0\n", Source::Withings, false).unwrap();
+        let all = db.entries(u).unwrap();
         assert!((all[0].weight_lb - 268.9).abs() < 1e-9);
         assert_eq!(all[0].memo, "mine");
+    }
+
+    #[test]
+    fn two_profiles_importing_the_same_day_do_not_collide() {
+        let db = Db::open_in_memory().unwrap();
+        let a = def_user(&db);
+        let b = db.create_user("Partner").unwrap().id;
+        import_csv(&db, a, "date,weight_lb\n2026-09-01,200.0\n", Source::Manual, true).unwrap();
+        import_csv(&db, b, "date,weight_lb\n2026-09-01,140.0\n", Source::Manual, true).unwrap();
+        assert!((db.entries(a).unwrap()[0].weight_lb - 200.0).abs() < 1e-9);
+        assert!((db.entries(b).unwrap()[0].weight_lb - 140.0).abs() < 1e-9);
     }
 }

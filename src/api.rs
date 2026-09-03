@@ -3,7 +3,7 @@
 
 use crate::db::Db;
 use crate::import::{self, ImportReport};
-use crate::model::{Entry, GoalView, Source, Stats};
+use crate::model::{Entry, GoalView, Source, Stats, User};
 use crate::stats;
 use crate::withings;
 use axum::{
@@ -33,6 +33,12 @@ struct Web;
 
 pub fn router(app: App) -> Router {
     Router::new()
+        .route("/api/users", get(list_users).post(create_user))
+        .route(
+            "/api/users/:id",
+            axum::routing::put(rename_user).delete(delete_user),
+        )
+        .route("/api/users/:id/activate", post(activate_user))
         .route("/api/entries", get(list_entries).post(put_entry))
         .route("/api/entries/:date", axum::routing::delete(del_entry))
         .route("/api/stats", get(get_stats))
@@ -76,8 +82,60 @@ impl IntoResponse for ApiError {
     }
 }
 
+/* ── users / profiles ──────────────────────────────────────────── */
+
+#[derive(serde::Serialize)]
+struct UserOut {
+    id: i64,
+    name: String,
+    /// Whichever profile this device is currently showing.
+    active: bool,
+}
+
+fn user_out(u: User, active: i64) -> UserOut {
+    UserOut { active: u.id == active, id: u.id, name: u.name }
+}
+
+async fn list_users(State(a): State<App>) -> ApiResult<Json<Vec<UserOut>>> {
+    let active = a.db.active_user_id()?;
+    let users = a.db.users()?;
+    Ok(Json(users.into_iter().map(|u| user_out(u, active)).collect()))
+}
+
+#[derive(Deserialize)]
+struct UserIn {
+    name: String,
+}
+
+async fn create_user(State(a): State<App>, Json(b): Json<UserIn>) -> ApiResult<Json<UserOut>> {
+    let active = a.db.active_user_id()?;
+    let u = a.db.create_user(&b.name)?;
+    Ok(Json(user_out(u, active)))
+}
+
+async fn rename_user(
+    State(a): State<App>,
+    Path(id): Path<i64>,
+    Json(b): Json<UserIn>,
+) -> ApiResult<StatusCode> {
+    a.db.rename_user(id, &b.name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_user(State(a): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    a.db.delete_user(id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn activate_user(State(a): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    a.db.set_active_user(id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/* ── entries ───────────────────────────────────────────────────── */
+
 async fn list_entries(State(a): State<App>) -> ApiResult<Json<Vec<Entry>>> {
-    Ok(Json(a.db.entries()?))
+    Ok(Json(a.db.entries(a.db.active_user_id()?)?))
 }
 
 #[derive(Deserialize)]
@@ -95,13 +153,13 @@ async fn put_entry(State(a): State<App>, Json(b): Json<EntryIn>) -> ApiResult<Js
         memo: b.memo,
         source: Source::Manual,
     };
-    a.db.upsert(&e)?;
+    a.db.upsert(a.db.active_user_id()?, &e)?;
     Ok(Json(e))
 }
 
 async fn del_entry(State(a): State<App>, Path(date): Path<String>) -> ApiResult<StatusCode> {
     let d = NaiveDate::parse_from_str(&date, "%Y-%m-%d")?;
-    Ok(if a.db.delete(d)? {
+    Ok(if a.db.delete(a.db.active_user_id()?, d)? {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -109,8 +167,9 @@ async fn del_entry(State(a): State<App>, Path(date): Path<String>) -> ApiResult<
 }
 
 async fn get_stats(State(a): State<App>) -> ApiResult<Json<Stats>> {
-    let e = a.db.entries()?;
-    Ok(Json(stats::compute(&e, a.db.current_goal()?)))
+    let uid = a.db.active_user_id()?;
+    let e = a.db.entries(uid)?;
+    Ok(Json(stats::compute(&e, a.db.current_goal(uid)?)))
 }
 
 #[derive(Deserialize)]
@@ -131,7 +190,7 @@ async fn get_series(
     State(a): State<App>,
     Query(q): Query<SeriesQuery>,
 ) -> ApiResult<Json<Vec<SeriesPoint>>> {
-    let all = a.db.entries()?;
+    let all = a.db.entries(a.db.active_user_id()?)?;
     let ma: std::collections::HashMap<NaiveDate, f64> =
         stats::moving_average(&all, 7).into_iter().collect();
     let cutoff = match (q.days, all.last()) {
@@ -173,8 +232,9 @@ fn views_for(entries: &[Entry], goals: Vec<crate::model::Goal>) -> Vec<GoalView>
 /// Every goal, newest first, with its outcome already worked out — hit,
 /// missed, superseded, or still open.
 async fn list_goals(State(a): State<App>) -> ApiResult<Json<Vec<GoalView>>> {
-    let entries = a.db.entries()?;
-    let goals = a.db.goals()?;
+    let uid = a.db.active_user_id()?;
+    let entries = a.db.entries(uid)?;
+    let goals = a.db.goals(uid)?;
     Ok(Json(views_for(&entries, goals)))
 }
 
@@ -182,7 +242,8 @@ async fn list_goals(State(a): State<App>) -> ApiResult<Json<Vec<GoalView>>> {
 /// current before falls back into history. Editing an existing goal in
 /// place is `PUT /api/goals/:id`.
 async fn add_goal(State(a): State<App>, Json(b): Json<GoalIn>) -> ApiResult<Json<GoalView>> {
-    let entries = a.db.entries()?;
+    let uid = a.db.active_user_id()?;
+    let entries = a.db.entries(uid)?;
     let start_lb = b
         .start_lb
         .or_else(|| entries.last().map(|e| e.weight_lb))
@@ -191,9 +252,9 @@ async fn add_goal(State(a): State<App>, Json(b): Json<GoalIn>) -> ApiResult<Json
         .start_date
         .or_else(|| entries.last().map(|e| e.date))
         .unwrap_or_else(|| chrono::Utc::now().date_naive());
-    let saved = a.db.add_goal(b.target_lb, b.target_date, start_lb, start_date)?;
+    let saved = a.db.add_goal(uid, b.target_lb, b.target_date, start_lb, start_date)?;
     let id = saved.id;
-    let goals = a.db.goals()?;
+    let goals = a.db.goals(uid)?;
     let view = views_for(&entries, goals)
         .into_iter()
         .find(|v| v.goal.id == id)
@@ -206,17 +267,18 @@ async fn update_goal(
     Path(id): Path<i64>,
     Json(b): Json<GoalIn>,
 ) -> ApiResult<Json<GoalView>> {
+    let uid = a.db.active_user_id()?;
     let existing = a
         .db
-        .goals()?
+        .goals(uid)?
         .into_iter()
         .find(|g| g.id == id)
         .ok_or_else(|| anyhow::anyhow!("No such goal."))?;
     let start_lb = b.start_lb.unwrap_or(existing.start_lb);
     let start_date = b.start_date.unwrap_or(existing.start_date);
-    a.db.update_goal(id, b.target_lb, b.target_date, start_lb, start_date)?;
-    let entries = a.db.entries()?;
-    let goals = a.db.goals()?;
+    a.db.update_goal(uid, id, b.target_lb, b.target_date, start_lb, start_date)?;
+    let entries = a.db.entries(uid)?;
+    let goals = a.db.goals(uid)?;
     let view = views_for(&entries, goals)
         .into_iter()
         .find(|v| v.goal.id == id)
@@ -225,7 +287,8 @@ async fn update_goal(
 }
 
 async fn delete_goal(State(a): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    Ok(if a.db.delete_goal(id)? {
+    let uid = a.db.active_user_id()?;
+    Ok(if a.db.delete_goal(uid, id)? {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -246,13 +309,14 @@ async fn post_import(
     body: String,
 ) -> ApiResult<Json<ImportReport>> {
     let src = q.source.as_deref().map(Source::parse).unwrap_or(Source::Import);
-    Ok(Json(import::import_csv(&a.db, &body, src, q.overwrite)?))
+    let uid = a.db.active_user_id()?;
+    Ok(Json(import::import_csv(&a.db, uid, &body, src, q.overwrite)?))
 }
 
 async fn export_csv(State(a): State<App>) -> ApiResult<Response> {
     let mut w = csv::Writer::from_writer(vec![]);
     w.write_record(["date", "weight_lb", "memo", "source"])?;
-    for e in a.db.entries()? {
+    for e in a.db.entries(a.db.active_user_id()?)? {
         w.write_record([
             e.date.format("%Y-%m-%d").to_string(),
             format!("{:.2}", e.weight_lb),
@@ -310,7 +374,7 @@ fn redirect_uri(a: &App) -> String {
 }
 
 async fn w_status(State(a): State<App>) -> ApiResult<Json<serde_json::Value>> {
-    let s = withings::status(&a.db)?;
+    let s = withings::status(&a.db, a.db.active_user_id()?)?;
     Ok(Json(serde_json::json!({
         "configured": s.configured,
         "client_id": s.client_id,
@@ -331,7 +395,7 @@ async fn w_config(
 }
 
 async fn w_authorize(State(a): State<App>) -> ApiResult<Json<serde_json::Value>> {
-    let url = withings::authorize_url(&a.db, &redirect_uri(&a))?;
+    let url = withings::authorize_url(&a.db, a.db.active_user_id()?, &redirect_uri(&a))?;
     Ok(Json(serde_json::json!({ "url": url })))
 }
 
@@ -345,6 +409,15 @@ pub struct CallbackQuery {
 /// Withings sends the browser here. Answer with a small page rather than JSON —
 /// a human is looking at it.
 async fn w_callback(State(a): State<App>, Query(q): Query<CallbackQuery>) -> Response {
+    // Which profile this belongs to, best-effort: the state string carries
+    // it (see `authorize_url`), falling back to whoever's active now for
+    // the rare case that's unreadable — good enough for attributing an
+    // error message that would otherwise have nowhere to go.
+    let uid_hint = q
+        .state
+        .as_deref()
+        .and_then(withings::uid_from_state)
+        .or_else(|| a.db.active_user_id().ok());
     let outcome = match (q.error, q.code, q.state) {
         (Some(e), _, _) => Err(format!("Withings declined the link: {e}")),
         (_, Some(code), Some(state)) => {
@@ -354,8 +427,8 @@ async fn w_callback(State(a): State<App>, Query(q): Query<CallbackQuery>) -> Res
         }
         _ => Err("Withings sent us back without an authorization code.".to_string()),
     };
-    if let Err(ref e) = outcome {
-        withings::record_error(&a.db, e);
+    if let (Err(ref e), Some(uid)) = (&outcome, uid_hint) {
+        withings::record_error(&a.db, uid, e);
     }
 
     let ok = outcome.is_ok();
@@ -398,23 +471,25 @@ async fn w_sync(
     State(a): State<App>,
     Query(q): Query<SyncQuery>,
 ) -> ApiResult<Json<withings::SyncReport>> {
-    match withings::sync(&a.db, q.since).await {
+    let uid = a.db.active_user_id()?;
+    match withings::sync(&a.db, uid, q.since).await {
         Ok(r) => Ok(Json(r)),
         Err(e) => {
-            withings::record_error(&a.db, &format!("{e:#}"));
+            withings::record_error(&a.db, uid, &format!("{e:#}"));
             Err(e.into())
         }
     }
 }
 
 async fn w_unlink(State(a): State<App>) -> ApiResult<Json<serde_json::Value>> {
-    withings::unlink(&a.db)?;
-    withings::clear_error(&a.db)?;
+    let uid = a.db.active_user_id()?;
+    withings::unlink(&a.db, uid)?;
+    withings::clear_error(&a.db, uid)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn w_clear_error(State(a): State<App>) -> ApiResult<Json<serde_json::Value>> {
-    withings::clear_error(&a.db)?;
+    withings::clear_error(&a.db, a.db.active_user_id()?)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

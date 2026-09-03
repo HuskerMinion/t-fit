@@ -21,6 +21,7 @@ const state = {
   view: "chart",
   series: [],       // what's currently plotted
   prefs: null,
+  users: [],        // every profile, with .active marking the current one
 };
 
 /* Defaults for a fresh database. Anything added here is picked up by the
@@ -125,7 +126,27 @@ function applyRange() {
 /* ── tiles ───────────────────────────────────────────────────── */
 function renderTiles() {
   const s = state.stats;
-  if (!s || !s.count) return;
+  if (!s || !s.count) {
+    // Switching to a profile with nothing logged yet must clear whatever
+    // the previous one left on screen — otherwise these look like live
+    // numbers for whoever's now active instead of stale leftovers.
+    $("#s-current").textContent = "—";
+    $("#s-current-sub").textContent = "no data yet";
+    $("#s-trend").textContent = "—";
+    $("#s-trend-sub").textContent = "smoothed";
+    const d30 = $("#s-30");
+    d30.textContent = "—";
+    d30.className = "tile-value";
+    $("#s-30-sub").textContent = "change";
+    const rate = $("#s-rate");
+    rate.textContent = "—";
+    rate.className = "tile-value";
+    const g = $("#s-goal");
+    g.textContent = "—";
+    g.className = "tile-value";
+    $("#s-goal-sub").textContent = "set a goal below";
+    return;
+  }
 
   $("#s-current").textContent = lb(s.current);
   $("#s-current-sub").textContent = s.last ? fmtDay(s.last) : "";
@@ -575,6 +596,156 @@ function renderGoalHistory() {
   for (const g of list) wrap.appendChild(goalRow(g));
 }
 
+/* ── profiles ────────────────────────────────────────────────── */
+async function loadUsers() {
+  const users = await api("/api/users");
+  state.users = users;
+  renderProfiles();
+  const active = users.find((u) => u.active);
+  $("#btn-profile").textContent = active ? active.name : "Profile";
+}
+
+/* Quick switching lives in this topbar dropdown; Settings → Profile is for
+ * add / rename / delete only, so there's exactly one place for each. */
+function openProfileMenu() {
+  const menu = $("#profile-menu");
+  menu.innerHTML = "";
+  for (const u of state.users) menu.appendChild(profileMenuItem(u));
+  const divider = document.createElement("div");
+  divider.className = "profile-menu-divider";
+  menu.appendChild(divider);
+  const manage = document.createElement("button");
+  manage.type = "button";
+  manage.className = "profile-menu-manage";
+  manage.textContent = "Add, rename or delete…";
+  manage.addEventListener("click", () => {
+    closeProfileMenu();
+    $("#settings").showModal();
+  });
+  menu.appendChild(manage);
+  menu.hidden = false;
+  $("#btn-profile").setAttribute("aria-expanded", "true");
+}
+
+function closeProfileMenu() {
+  $("#profile-menu").hidden = true;
+  $("#btn-profile").setAttribute("aria-expanded", "false");
+}
+
+function toggleProfileMenu() {
+  if ($("#profile-menu").hidden) openProfileMenu();
+  else closeProfileMenu();
+}
+
+function profileMenuItem(u) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "profile-menu-item" + (u.active ? " on" : "");
+  b.setAttribute("role", "menuitem");
+  b.innerHTML = `<span class="profile-dot"></span><span>${escapeHtml(u.name)}</span>`;
+  b.addEventListener("click", async () => {
+    closeProfileMenu();
+    if (u.active) return;
+    try {
+      await api(`/api/users/${u.id}/activate`, { method: "POST" });
+      await afterProfileChange();
+    } catch (e) {
+      console.warn("could not switch profile:", e.message);
+      await loadUsers();
+    }
+  });
+  return b;
+}
+
+function renderProfiles() {
+  const wrap = $("#profile-list");
+  wrap.innerHTML = "";
+  for (const u of state.users) wrap.appendChild(profileRow(u));
+}
+
+/** Switching, renaming and deleting all reload the same three things —
+ * whoever's active can change who owns the data on screen. */
+async function afterProfileChange() {
+  await loadUsers();
+  await load();
+  await loadWithings();
+}
+
+function profileRow(u) {
+  const row = document.createElement("div");
+  row.className = "profile-row";
+  row.innerHTML =
+    `<span class="profile-tag${u.active ? " on" : ""}">` +
+      `<span class="profile-dot"></span><span class="profile-name">${escapeHtml(u.name)}</span>` +
+    `</span>` +
+    `<div class="profile-row-actions">` +
+      `<button type="button" class="link-btn profile-rename">Rename</button>` +
+      `<button type="button" class="link-btn profile-delete"${state.users.length <= 1 ? " disabled" : ""}>Delete</button>` +
+    `</div>`;
+
+  row.querySelector(".profile-rename").addEventListener("click", () => editProfileRow(row, u));
+
+  // Delete asks once, inline: the first click arms it, a second click
+  // within a few seconds confirms. No native confirm() dialog to block on,
+  // and it can't be triggered by one accidental click.
+  const delBtn = row.querySelector(".profile-delete");
+  let confirming = false, revertTimer = null;
+  const revert = () => {
+    confirming = false;
+    delBtn.textContent = "Delete";
+    delBtn.classList.remove("warn");
+  };
+  delBtn.addEventListener("click", async () => {
+    if (state.users.length <= 1) return;
+    if (!confirming) {
+      confirming = true;
+      delBtn.textContent = "Confirm?";
+      delBtn.classList.add("warn");
+      revertTimer = setTimeout(revert, 4000);
+      return;
+    }
+    clearTimeout(revertTimer);
+    try {
+      await api(`/api/users/${u.id}`, { method: "DELETE" });
+      await afterProfileChange();
+      msg("#profile-msg", `Deleted ${u.name} and their history.`, "ok");
+    } catch (e) {
+      revert();
+      msg("#profile-msg", e.message, "err");
+    }
+  });
+
+  return row;
+}
+
+function editProfileRow(row, u) {
+  row.innerHTML = `
+    <form class="profile-edit-form">
+      <div class="field grow">
+        <label>Name</label>
+        <input type="text" class="pe-name" maxlength="60" value="${escapeHtml(u.name)}">
+      </div>
+      <button type="submit" class="ghost">Save</button>
+      <button type="button" class="ghost pe-cancel">Cancel</button>
+    </form>`;
+  row.querySelector(".profile-edit-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const name = row.querySelector(".pe-name").value.trim();
+    if (!name) return;
+    try {
+      await api(`/api/users/${u.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      await loadUsers();
+    } catch (e) {
+      msg("#profile-msg", e.message, "err");
+    }
+  });
+  row.querySelector(".pe-cancel").addEventListener("click", renderProfiles);
+}
+
 /* ── wiring ──────────────────────────────────────────────────── */
 async function syncNow() {
   const b = $("#w-sync");
@@ -781,6 +952,41 @@ function wire() {
   $("#btn-settings").addEventListener("click", () => dlg.showModal());
   // Click outside the panel closes it; <dialog> handles Esc itself.
   dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); });
+  // Opening Settings for any other reason (e.g. the dropdown's "manage"
+  // link) should never leave the quick-switch dropdown open behind it.
+  dlg.addEventListener("close", closeProfileMenu);
+
+  /* Profile switcher — a click-open dropdown, the fast path for switching.
+     Settings → Profile stays where add / rename / delete happen. */
+  $("#btn-profile").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    toggleProfileMenu();
+  });
+  document.addEventListener("click", (ev) => {
+    if (!$("#profile-switcher").contains(ev.target)) closeProfileMenu();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeProfileMenu();
+  });
+
+  $("#profile-add-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const input = $("#profile-new-name");
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await api("/api/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      input.value = "";
+      await loadUsers();
+      msg("#profile-msg", `Added ${name}.`, "ok");
+    } catch (e) {
+      msg("#profile-msg", e.message, "err");
+    }
+  });
 
   $("#p-range").addEventListener("change", (e) =>
     savePrefs({ range: e.target.value === "all" ? "all" : +e.target.value }));
@@ -928,6 +1134,7 @@ boot();
 async function boot() {
   await loadPrefs();
   try {
+    await loadUsers();
     await load();
   } catch (e) {
     msg("#entry-msg", "Could not load data: " + e.message, "err");

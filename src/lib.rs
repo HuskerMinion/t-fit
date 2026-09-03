@@ -80,42 +80,56 @@ fn sync_interval_hours(db: &db::Db) -> i64 {
         .clamp(0, 24 * 7)
 }
 
+/// One interval applies app-wide (it's a shared display-ish preference, not
+/// something each profile sets separately) but each linked profile is
+/// checked and synced independently — one person's scale pulling in has
+/// nothing to do with whether another's is due.
 async fn auto_sync_tick(db: &db::Db) -> anyhow::Result<()> {
     let hours = sync_interval_hours(db);
     if hours == 0 {
         return Ok(()); // automatic sync switched off
     }
-    let status = withings::status(db)?;
-    if !status.linked {
-        return Ok(());
-    }
 
-    // Due when we've never synced, or the last success is older than the
-    // interval. Keyed off the stored timestamp rather than a timer, so a
-    // restart doesn't trigger a needless pull.
-    let due = match status.last_sync.as_deref() {
-        None => true,
-        Some(t) => match chrono::DateTime::parse_from_rfc3339(t) {
-            Ok(when) => {
-                chrono::Utc::now() - when.with_timezone(&chrono::Utc)
-                    >= chrono::Duration::hours(hours)
+    for u in db.users()? {
+        let status = match withings::status(db, u.id) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("withings status check failed for {}: {e:#}", u.name);
+                continue;
             }
-            Err(_) => true,
-        },
-    };
-    if !due {
-        return Ok(());
-    }
+        };
+        if !status.linked {
+            continue;
+        }
 
-    match withings::sync(db, None).await {
-        Ok(r) => tracing::info!(
-            "withings auto-sync: {} new, {} already present",
-            r.inserted,
-            r.skipped_existing
-        ),
-        Err(e) => {
-            tracing::warn!("withings auto-sync failed: {e:#}");
-            withings::record_error(db, &format!("{e:#}"));
+        // Due when we've never synced, or the last success is older than
+        // the interval. Keyed off the stored timestamp rather than a
+        // timer, so a restart doesn't trigger a needless pull.
+        let due = match status.last_sync.as_deref() {
+            None => true,
+            Some(t) => match chrono::DateTime::parse_from_rfc3339(t) {
+                Ok(when) => {
+                    chrono::Utc::now() - when.with_timezone(&chrono::Utc)
+                        >= chrono::Duration::hours(hours)
+                }
+                Err(_) => true,
+            },
+        };
+        if !due {
+            continue;
+        }
+
+        match withings::sync(db, u.id, None).await {
+            Ok(r) => tracing::info!(
+                "withings auto-sync ({}): {} new, {} already present",
+                u.name,
+                r.inserted,
+                r.skipped_existing
+            ),
+            Err(e) => {
+                tracing::warn!("withings auto-sync ({}) failed: {e:#}", u.name);
+                withings::record_error(db, u.id, &format!("{e:#}"));
+            }
         }
     }
     Ok(())

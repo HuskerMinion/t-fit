@@ -64,27 +64,30 @@ pub struct SyncReport {
     pub last: Option<String>,
 }
 
-pub fn status(db: &Db) -> Result<Status> {
+/// Status is always asked for on behalf of one profile — the app
+/// registration (`configured`/`client_id`/`has_secret`) is shared, but
+/// whether *this* person is linked is not.
+pub fn status(db: &Db, uid: i64) -> Result<Status> {
     let client_id = db.setting(key::CLIENT_ID)?;
     let has_secret = db.setting(key::CLIENT_SECRET)?.is_some();
     Ok(Status {
         configured: client_id.is_some() && has_secret,
         client_id,
         has_secret,
-        linked: db.setting(key::REFRESH)?.is_some(),
-        last_sync: db.setting(key::LAST_SYNC)?,
-        last_error: db.setting(key::LAST_ERROR)?,
+        linked: db.user_setting(uid, key::REFRESH)?.is_some(),
+        last_sync: db.user_setting(uid, key::LAST_SYNC)?,
+        last_error: db.user_setting(uid, key::LAST_ERROR)?,
     })
 }
 
 /// Remember why something failed. The OAuth callback happens in a tab the
 /// user may close before reading it, so the reason has to outlive that tab.
-pub fn record_error(db: &Db, msg: &str) {
-    let _ = db.set_setting(key::LAST_ERROR, msg);
+pub fn record_error(db: &Db, uid: i64, msg: &str) {
+    let _ = db.set_user_setting(uid, key::LAST_ERROR, msg);
 }
 
-pub fn clear_error(db: &Db) -> Result<()> {
-    db.del_setting(key::LAST_ERROR)
+pub fn clear_error(db: &Db, uid: i64) -> Result<()> {
+    db.del_user_setting(uid, key::LAST_ERROR)
 }
 
 /// Save the registration. An empty secret means "keep the one already
@@ -106,28 +109,41 @@ pub fn save_config(db: &Db, c: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Forget the tokens (but keep the app registration).
-pub fn unlink(db: &Db) -> Result<()> {
+/// Forget this profile's tokens (but keep the shared app registration).
+pub fn unlink(db: &Db, uid: i64) -> Result<()> {
     for k in [key::ACCESS, key::REFRESH, key::EXPIRES, key::STATE] {
-        db.del_setting(k)?;
+        db.del_user_setting(uid, k)?;
     }
     Ok(())
 }
 
 /// The URL to send the browser to. `redirect_uri` must match the one
 /// registered with Withings exactly.
-pub fn authorize_url(db: &Db, redirect_uri: &str) -> Result<String> {
+///
+/// The state Withings echoes back is our only way to know, once the
+/// callback lands, which profile started this — the tab it opens in isn't
+/// necessarily still showing the same "active" user by then. So `uid`
+/// travels inside the state string itself rather than being looked up
+/// fresh at callback time.
+pub fn authorize_url(db: &Db, uid: i64, redirect_uri: &str) -> Result<String> {
     let id = db
         .setting(key::CLIENT_ID)?
         .ok_or_else(|| anyhow!("Withings is not configured yet — save a client id and secret first"))?;
-    let state = format!("{:x}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
-    db.set_setting(key::STATE, &state)?;
+    let state = format!("{uid}:{:x}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    db.set_user_setting(uid, key::STATE, &state)?;
     Ok(format!(
         "{AUTH_URL}?response_type=code&client_id={}&scope=user.metrics&state={}&redirect_uri={}",
         urlencoding::encode(&id),
         urlencoding::encode(&state),
         urlencoding::encode(redirect_uri),
     ))
+}
+
+/// Pull the profile id back out of a state string built by `authorize_url`.
+/// Used by the callback to know whose tokens to store, and to attribute an
+/// error, before anything has been validated yet.
+pub fn uid_from_state(state: &str) -> Option<i64> {
+    state.split(':').next()?.parse().ok()
 }
 
 /// Withings wraps every reply: `{"status":0,"body":{...}}`, and reports
@@ -158,12 +174,12 @@ struct Tokens {
     expires_in: i64,
 }
 
-fn store_tokens(db: &Db, t: &Tokens) -> Result<()> {
-    db.set_setting(key::ACCESS, &t.access_token)?;
-    db.set_setting(key::REFRESH, &t.refresh_token)?;
+fn store_tokens(db: &Db, uid: i64, t: &Tokens) -> Result<()> {
+    db.set_user_setting(uid, key::ACCESS, &t.access_token)?;
+    db.set_user_setting(uid, key::REFRESH, &t.refresh_token)?;
     // Expire a minute early so a sync never races the deadline.
     let at = Utc::now() + Duration::seconds(t.expires_in.saturating_sub(60).max(0));
-    db.set_setting(key::EXPIRES, &at.to_rfc3339())?;
+    db.set_user_setting(uid, key::EXPIRES, &at.to_rfc3339())?;
     Ok(())
 }
 
@@ -176,9 +192,13 @@ fn creds(db: &Db) -> Result<(String, String)> {
     ))
 }
 
-/// Exchange the `code` from the redirect for tokens.
+/// Exchange the `code` from the redirect for tokens. Which profile these
+/// belong to comes from `state` itself (see `authorize_url`), not from
+/// whatever happens to be "active" right now.
 pub async fn exchange_code(db: &Db, code: &str, state: &str, redirect_uri: &str) -> Result<()> {
-    let expect = db.setting(key::STATE)?.unwrap_or_default();
+    let uid = uid_from_state(state)
+        .ok_or_else(|| anyhow!("Withings sent back a state we don't recognize — start the link again from t-fit"))?;
+    let expect = db.user_setting(uid, key::STATE)?.unwrap_or_default();
     if expect.is_empty() || expect != state {
         bail!("OAuth state did not match — start the link again from t-fit");
     }
@@ -199,25 +219,25 @@ pub async fn exchange_code(db: &Db, code: &str, state: &str, redirect_uri: &str)
         .json()
         .await
         .context("Withings sent something that wasn't JSON")?;
-    store_tokens(db, &unwrap_envelope(res, "token exchange")?)?;
-    db.del_setting(key::STATE)?;
-    db.del_setting(key::LAST_ERROR)?;
+    store_tokens(db, uid, &unwrap_envelope(res, "token exchange")?)?;
+    db.del_user_setting(uid, key::STATE)?;
+    db.del_user_setting(uid, key::LAST_ERROR)?;
     Ok(())
 }
 
-/// A valid access token, refreshing first if it's stale.
-async fn access_token(db: &Db) -> Result<String> {
+/// A valid access token for this profile, refreshing first if it's stale.
+async fn access_token(db: &Db, uid: i64) -> Result<String> {
     let expires = db
-        .setting(key::EXPIRES)?
+        .user_setting(uid, key::EXPIRES)?
         .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
         .map(|d| d.with_timezone(&Utc));
-    if let (Some(tok), Some(exp)) = (db.setting(key::ACCESS)?, expires) {
+    if let (Some(tok), Some(exp)) = (db.user_setting(uid, key::ACCESS)?, expires) {
         if exp > Utc::now() {
             return Ok(tok);
         }
     }
     let refresh = db
-        .setting(key::REFRESH)?
+        .user_setting(uid, key::REFRESH)?
         .ok_or_else(|| anyhow!("Withings isn't linked yet"))?;
     let (id, secret) = creds(db)?;
     let res: Envelope<Tokens> = reqwest::Client::new()
@@ -235,7 +255,7 @@ async fn access_token(db: &Db) -> Result<String> {
         .json()
         .await?;
     let t = unwrap_envelope(res, "token refresh")?;
-    store_tokens(db, &t)?;
+    store_tokens(db, uid, &t)?;
     Ok(t.access_token)
 }
 
@@ -258,10 +278,10 @@ struct Measure {
 }
 
 /// Pull weight measurements from `since` (default: everything) and add any day
-/// we don't already have. Days already in the database are never touched —
-/// a hand-typed weight and its note always win.
-pub async fn sync(db: &Db, since: Option<NaiveDate>) -> Result<SyncReport> {
-    let token = access_token(db).await?;
+/// we don't already have to this profile's log. Days already in the
+/// database are never touched — a hand-typed weight and its note always win.
+pub async fn sync(db: &Db, uid: i64, since: Option<NaiveDate>) -> Result<SyncReport> {
+    let token = access_token(db, uid).await?;
     let start = since
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| dt.and_utc().timestamp())
@@ -319,15 +339,15 @@ pub async fn sync(db: &Db, since: Option<NaiveDate>) -> Result<SyncReport> {
             memo: String::new(),
             source: Source::Withings,
         };
-        if db.insert_if_absent(&e)? {
+        if db.insert_if_absent(uid, &e)? {
             inserted += 1;
         } else {
             skipped += 1;
         }
     }
 
-    db.set_setting(key::LAST_SYNC, &Utc::now().to_rfc3339())?;
-    db.del_setting(key::LAST_ERROR)?;
+    db.set_user_setting(uid, key::LAST_SYNC, &Utc::now().to_rfc3339())?;
+    db.del_user_setting(uid, key::LAST_ERROR)?;
     Ok(SyncReport {
         fetched,
         inserted,

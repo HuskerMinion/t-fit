@@ -102,6 +102,10 @@
     <h1>t-fit</h1>
   </div>
   <div class="topbar-actions">
+    <div class="profile-switcher" id="profile-switcher">
+      <button id="btn-profile" class="profile-pill" type="button" title="Switch profile" aria-haspopup="true" aria-expanded="false">—</button>
+      <div class="profile-menu" id="profile-menu" role="menu" hidden></div>
+    </div>
     <button id="btn-theme" class="icon-btn" title="Toggle light / dark" aria-label="Toggle light or dark mode">◐</button>
     <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Open settings">☰</button>
   </div>
@@ -242,6 +246,19 @@
   </form>
 
   <div class="drawer-body">
+    <section class="pref-group">
+      <h3>Profile</h3>
+      <div class="profile-list" id="profile-list"></div>
+      <form id="profile-add-form" autocomplete="off">
+        <div class="field grow">
+          <label for="profile-new-name">Add a profile</label>
+          <input type="text" id="profile-new-name" maxlength="60" placeholder="Name">
+        </div>
+        <button type="submit" class="ghost">Add</button>
+      </form>
+      <p class="form-msg" id="profile-msg" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="pref-group">
       <h3>Chart</h3>
 

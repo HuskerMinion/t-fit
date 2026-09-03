@@ -3,6 +3,14 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
+/// One family member's profile. Everything else — entries, goals, the
+/// Withings link — is scoped to one of these.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: i64,
+    pub name: String,
+}
+
 /// One weigh-in. At most one per calendar day — the day *is* the identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {

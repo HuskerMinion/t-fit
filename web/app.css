@@ -128,6 +128,48 @@ h2 { font-size: 15px; }
 }
 .icon-btn:hover { color: var(--ink); border-color: var(--ink-3); }
 
+/* Whose log the main page is showing right now, and the fast way to switch
+   — a click-open dropdown of everyone else. Adding, renaming and deleting
+   profiles stays in Settings; this is just for jumping between them. */
+.profile-switcher { position: relative; }
+.profile-pill {
+  font: inherit; font-weight: 600; font-size: 13px;
+  height: 34px; padding: 0 13px; border-radius: 10px;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  cursor: pointer;
+}
+.profile-pill:hover { color: var(--ink); border-color: var(--ink-3); }
+.profile-switcher:has(.profile-pill[aria-expanded="true"]) .profile-pill {
+  color: var(--ink); border-color: var(--s1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--s1) 18%, transparent);
+}
+
+.profile-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
+  min-width: 190px; max-width: 260px;
+  display: flex; flex-direction: column; gap: 1px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  padding: 5px;
+}
+.profile-menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  font: inherit; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: left;
+  background: none; border: none; border-radius: 7px; padding: 8px 9px; cursor: pointer;
+}
+.profile-menu-item:hover { background: var(--surface-2); }
+.profile-menu-item.on { color: var(--s1); }
+.profile-menu-item .profile-dot { background: var(--line); }
+.profile-menu-item.on .profile-dot { background: var(--s1); }
+.profile-menu-divider { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+.profile-menu-manage {
+  display: block; width: 100%; text-align: left;
+  font: inherit; font-size: 12.5px; color: var(--ink-3);
+  background: none; border: none; border-radius: 7px; padding: 7px 9px; cursor: pointer;
+}
+.profile-menu-manage:hover { color: var(--ink); background: var(--surface-2); }
+
 main {
   position: relative; z-index: 1;
   max-width: 1080px;
@@ -479,6 +521,23 @@ dialog.drawer::backdrop { background: #0009; }
 }
 
 .pref-note { font-size: 12.5px; color: var(--ink-3); margin: 18px 0 0; line-height: 1.6; }
+
+/* ── profiles (Settings: manage only — add / rename / delete;
+   switching lives in the topbar dropdown, not here) ──────────── */
+.profile-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 12px; }
+.profile-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.profile-tag {
+  display: flex; align-items: center; gap: 9px; flex: 1 1 auto; min-width: 140px;
+  font-weight: 500; font-size: 14px; color: var(--ink);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 9px 12px;
+}
+.profile-tag.on { border-color: var(--s1); background: color-mix(in srgb, var(--s1) 12%, var(--surface-2)); }
+.profile-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+.profile-tag.on .profile-dot { background: var(--s1); }
+.profile-row-actions { display: flex; gap: 12px; flex: none; }
+.profile-row-actions .link-btn.warn { color: var(--bad); }
+.profile-edit-form { width: 100%; }
 
 /* Status plus every Withings action (sync, connect, unlink) — the whole
    feature lives here in Settings, nothing on the main page. */

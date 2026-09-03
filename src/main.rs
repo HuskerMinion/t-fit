@@ -72,15 +72,16 @@ async fn main() -> Result<()> {
 
     if let Some(fdy) = args.import_fitday {
         let d = db::Db::open(&path)?;
+        let uid = d.active_user_id()?;
         let bytes = std::fs::read(&fdy)?;
         let report = fitday::parse(&bytes)?;
         let mut added = 0usize;
         let mut existing = 0usize;
         for e in &report.entries {
             if args.overwrite {
-                d.upsert(e)?;
+                d.upsert(uid, e)?;
                 added += 1;
-            } else if d.insert_if_absent(e)? {
+            } else if d.insert_if_absent(uid, e)? {
                 added += 1;
             } else {
                 existing += 1;
@@ -108,8 +109,9 @@ async fn main() -> Result<()> {
 
     if let Some(csv_path) = args.import {
         let d = db::Db::open(&path)?;
+        let uid = d.active_user_id()?;
         let text = std::fs::read_to_string(&csv_path)?;
-        let rep = import::import_csv(&d, &text, model::Source::Import, args.overwrite)?;
+        let rep = import::import_csv(&d, uid, &text, model::Source::Import, args.overwrite)?;
         println!(
             "imported {} of {} rows ({} already present, {} errors)",
             rep.inserted,
