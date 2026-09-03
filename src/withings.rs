@@ -107,9 +107,20 @@ pub fn save_config(db: &Db, uid: i64, c: &Config) -> Result<()> {
     if secret.is_empty() && db.user_setting(uid, key::CLIENT_SECRET)?.is_none() {
         bail!("a client secret is required the first time");
     }
+    let previous = db.user_setting(uid, key::CLIENT_ID)?;
     db.set_user_setting(uid, key::CLIENT_ID, id)?;
     if !secret.is_empty() {
         db.set_user_setting(uid, key::CLIENT_SECRET, secret)?;
+    }
+    // Tokens belong to the application that minted them: Withings won't
+    // refresh a token presented with a different client id. So pointing a
+    // profile at a new registration makes whatever it is holding dead
+    // weight — it would keep syncing off the cached access token and then
+    // fail hours later, looking for all the world like a Withings outage.
+    // Drop it here instead, so the card plainly says "connect" while the
+    // person is still sitting in front of it.
+    if previous.as_deref() != Some(id) {
+        unlink(db, uid)?;
     }
     Ok(())
 }
@@ -404,6 +415,32 @@ mod tests {
         save_config(&db, b, &Config { client_id: "id-b2".into(), client_secret: String::new() }).unwrap();
         assert_eq!(creds(&db, b).unwrap(), ("id-b2".into(), "sec-b".into()));
         assert_eq!(creds(&db, a).unwrap(), ("id-a".into(), "sec-a".into()));
+    }
+
+    /// The state that bit us in the field: a profile holding tokens minted
+    /// by someone else's application. It syncs off the cached access token
+    /// and only fails hours later, at the first refresh. Re-registering has
+    /// to clear it rather than leave the trap armed.
+    #[test]
+    fn pointing_a_profile_at_a_new_registration_drops_its_stale_tokens() {
+        let db = Db::open_in_memory().unwrap();
+        let u = db.users().unwrap()[0].id;
+        save_config(&db, u, &Config { client_id: "old-app".into(), client_secret: "old-sec".into() }).unwrap();
+        db.set_user_setting(u, key::ACCESS, "tok").unwrap();
+        db.set_user_setting(u, key::REFRESH, "ref").unwrap();
+        db.set_user_setting(u, key::EXPIRES, "2030-01-01T00:00:00+00:00").unwrap();
+        assert!(status(&db, u).unwrap().linked);
+
+        // Same id, new secret: the link still belongs to this app, so keep it.
+        save_config(&db, u, &Config { client_id: "old-app".into(), client_secret: "new-sec".into() }).unwrap();
+        assert!(status(&db, u).unwrap().linked, "a secret correction must not unlink");
+
+        // Different id: those tokens can never be refreshed again.
+        save_config(&db, u, &Config { client_id: "new-app".into(), client_secret: String::new() }).unwrap();
+        let s = status(&db, u).unwrap();
+        assert!(!s.linked, "stale tokens should have been dropped");
+        assert!(s.configured, "the new registration stays saved");
+        assert!(db.user_setting(u, key::ACCESS).unwrap().is_none());
     }
 
     /// A brand-new profile starts from nothing, rather than inheriting

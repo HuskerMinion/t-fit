@@ -48,9 +48,34 @@ def save_creds(page, client_id, secret):
     page.wait_for_timeout(500)
 
 
+def strand_profile(db_path, name):
+    """Leave `name` holding a refresh token with no registration behind it.
+
+    This is what an older build could produce: tokens minted while the
+    client id was still app-wide, then that id migrating onto someone else's
+    profile. Forged directly in the database because the app itself can no
+    longer reach this state.
+    """
+    import sqlite3
+
+    c = sqlite3.connect(db_path, timeout=10)
+    (uid,) = c.execute("select id from users where name = ?", (name,)).fetchone()
+    for k in ("client_id", "client_secret"):
+        c.execute("delete from settings where key = ?", (f"u{uid}.withings.{k}",))
+    for k, v in (("access_token", "tok"), ("refresh_token", "ref"),
+                 ("expires_at", "2030-01-01T00:00:00+00:00")):
+        c.execute(
+            "insert into settings (key, value) values (?, ?) "
+            "on conflict(key) do update set value = excluded.value",
+            (f"u{uid}.withings.{k}", v),
+        )
+    c.commit()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:8788")
+    ap.add_argument("--db", required=True, help="the server's SQLite file, for forging edge states")
     a = ap.parse_args()
 
     with sync_playwright() as p:
@@ -144,6 +169,66 @@ def main():
         page.click("#w-setup-summary")
         page.wait_for_timeout(4500)
         check("closing it by hand sticks", not page.eval_on_selector("#w-setup", "e => e.open"))
+
+        # ── switching profiles from the Settings rows ─────────────────
+        # Closing Settings, switching in the topbar and coming back is three
+        # steps for something the row is already showing you.
+        page.reload()
+        page.wait_for_timeout(900)
+        open_settings(page)
+        rows = page.locator("#profile-list .profile-tag")
+        check("every profile row is a button", rows.count() == 2, f"{rows.count()} rows")
+        # Row order follows creation order, so row 0 is "Me".
+        active_before = page.evaluate("state.users.find(u => u.active).name")
+        target = "Wife" if active_before == "Me" else "Me"
+        page.locator("#profile-list .profile-tag", has_text=target).click()
+        page.wait_for_timeout(700)
+        check(
+            "clicking a profile row switches to it",
+            page.evaluate("state.users.find(u => u.active).name") == target,
+            page.evaluate("state.users.find(u => u.active).name"),
+        )
+        check("Settings stays open through the switch", page.eval_on_selector("#settings", "e => e.open"))
+        check(
+            "the Withings card follows the switch",
+            page.inner_text("#w-who").strip().lower() == f"· {target.lower()}",
+            repr(page.inner_text("#w-who")),
+        )
+        check(
+            "the switched-to row is marked current",
+            page.locator("#profile-list .profile-tag.on").inner_text().strip().lower().startswith(target.lower()),
+        )
+
+        # ── tokens with no registration behind them ──────────────────
+        # Forge the exact state an older build could leave: a refresh token
+        # on a profile whose client id and secret are gone.
+        page.evaluate(
+            """async () => {
+                 const u = state.users.find(x => x.name === 'Wife');
+                 if (!u.active) { await api('/api/users/' + u.id + '/activate', {method:'POST'}); }
+                 await afterProfileChange();
+               }"""
+        )
+        page.wait_for_timeout(400)
+        strand_profile(a.db, "Wife")
+        page.evaluate("loadWithings()")
+        page.wait_for_timeout(600)
+        check("a linked profile with no registration warns", not page.eval_on_selector("#w-warn", "e => e.hidden"))
+        check(
+            "and says so in the status line",
+            "not registered" in page.inner_text("#w-sub").lower(),
+            page.inner_text("#w-sub"),
+        )
+        check("and opens the registration form", page.eval_on_selector("#w-setup", "e => e.open"))
+
+        # Saving a registration must clear those unrefreshable tokens.
+        save_creds(page, "ID-WIFE-NEW", "SEC-WIFE-NEW")
+        check("saving a new registration drops the stale tokens", page.eval_on_selector("#w-warn", "e => e.hidden"))
+        check(
+            "and the card asks you to connect",
+            "Registered" in page.inner_text("#w-sub"),
+            page.inner_text("#w-sub"),
+        )
 
         check("no uncaught JS errors", not errors, "; ".join(errors[:3]))
         b.close()

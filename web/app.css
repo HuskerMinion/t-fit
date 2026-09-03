@@ -17,6 +17,7 @@
   --s2: #e06a3a;
   --good: #4caf7d;
   --bad: #e2645f;
+  --warn: #d9a441;
 
   --accent-a: #7c5cff;
   --accent-b: #22d3ee;
@@ -48,6 +49,7 @@ html[data-theme="light"] {
   --s2: #eb6834;
   --good: #2e7d51;
   --bad: #c0392b;
+  --warn: #b07d16;
 
   --accent-a: #6d4aff;
   --accent-b: #0ea5b7;
@@ -442,6 +444,13 @@ code.block {
   border: 1px solid color-mix(in srgb, var(--bad) 38%, var(--line));
   color: var(--ink);
 }
+/* Not broken yet, but will be. Amber rather than red: nothing has failed,
+   there's just something to fix before it does. */
+.banner.warn {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--line));
+  color: var(--ink);
+}
 .link-btn {
   background: none; border: none; padding: 0; color: var(--ink-3);
   font-size: 12.5px; text-decoration: underline; cursor: pointer; white-space: nowrap;
@@ -523,16 +532,28 @@ dialog.drawer::backdrop { background: #0009; }
 .pref-note { font-size: 12.5px; color: var(--ink-3); margin: 18px 0 0; line-height: 1.6; }
 
 /* ── profiles (Settings: manage only — add / rename / delete;
-   switching lives in the topbar dropdown, not here) ──────────── */
+   each row also switches to that profile) ─────────────────────── */
 .profile-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 12px; }
 .profile-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .profile-tag {
   display: flex; align-items: center; gap: 9px; flex: 1 1 auto; min-width: 140px;
-  font-weight: 500; font-size: 14px; color: var(--ink);
+  font-weight: 500; font-size: 14px; color: var(--ink); text-align: left;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
-  padding: 9px 12px;
+  padding: 9px 12px; cursor: pointer; font-family: inherit;
 }
+.profile-tag:hover { border-color: color-mix(in srgb, var(--s1) 55%, var(--line)); }
 .profile-tag.on { border-color: var(--s1); background: color-mix(in srgb, var(--s1) 12%, var(--surface-2)); }
+/* The current profile isn't going anywhere when clicked, so it shouldn't
+   invite the click in the first place. */
+.profile-tag.on { cursor: default; }
+.profile-tag.on:hover { border-color: var(--s1); }
+/* "switch" / "current", quiet until you look for it. */
+.profile-switch-hint {
+  margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.profile-tag:hover .profile-switch-hint { color: var(--ink-2); }
+.profile-tag.on:hover .profile-switch-hint { color: var(--ink-3); }
 .profile-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
 .profile-tag.on .profile-dot { background: var(--s1); }
 .profile-row-actions { display: flex; gap: 12px; flex: none; }

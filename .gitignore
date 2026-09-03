@@ -26,3 +26,4 @@ _*.tgz
 
 # Personal setup notes — hostnames, paths, tailnet details
 MY-SETUP.md
+Claude outputs/

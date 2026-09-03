@@ -605,8 +605,9 @@ async function loadUsers() {
   $("#btn-profile").textContent = active ? active.name : "Profile";
 }
 
-/* Quick switching lives in this topbar dropdown; Settings → Profile is for
- * add / rename / delete only, so there's exactly one place for each. */
+/* The topbar dropdown is the quick way to switch; the rows in Settings →
+ * Profile switch too, so you're never made to leave Settings and come back
+ * just to change who you're looking at. */
 function openProfileMenu() {
   const menu = $("#profile-menu");
   menu.innerHTML = "";
@@ -674,14 +675,32 @@ async function afterProfileChange() {
 function profileRow(u) {
   const row = document.createElement("div");
   row.className = "profile-row";
+  // The name is a button, not a label: clicking a profile here switches to
+  // it. Closing Settings, switching in the topbar and coming back in is
+  // three steps for something this row is already showing you.
   row.innerHTML =
-    `<span class="profile-tag${u.active ? " on" : ""}">` +
+    `<button type="button" class="profile-tag${u.active ? " on" : ""}"` +
+      `${u.active ? ' aria-current="true"' : ""}` +
+      ` title="${u.active ? "Current profile" : `Switch to ${escapeHtml(u.name)}`}">` +
       `<span class="profile-dot"></span><span class="profile-name">${escapeHtml(u.name)}</span>` +
-    `</span>` +
+      `<span class="profile-switch-hint">${u.active ? "current" : "switch"}</span>` +
+    `</button>` +
     `<div class="profile-row-actions">` +
       `<button type="button" class="link-btn profile-rename">Rename</button>` +
       `<button type="button" class="link-btn profile-delete"${state.users.length <= 1 ? " disabled" : ""}>Delete</button>` +
     `</div>`;
+
+  row.querySelector(".profile-tag").addEventListener("click", async () => {
+    if (u.active) return;
+    try {
+      await api(`/api/users/${u.id}/activate`, { method: "POST" });
+      await afterProfileChange();
+      msg("#profile-msg", `Switched to ${u.name}.`, "ok");
+    } catch (e) {
+      msg("#profile-msg", e.message, "err");
+      await loadUsers();
+    }
+  });
 
   row.querySelector(".profile-rename").addEventListener("click", () => editProfileRow(row, u));
 
@@ -1041,11 +1060,32 @@ async function loadWithings({ settle = true } = {}) {
   $("#w-err").hidden = !w.last_error;
   if (w.last_error) $("#w-err-text").textContent = w.last_error;
 
-  // Three states, and the card should only ever describe the one you're in.
+  // Tokens with nothing behind them: this profile is linked but has no
+  // registration of its own, so it syncs happily off the cached access
+  // token and then can't renew it. Broken, just not yet — which is exactly
+  // the kind of failure worth naming before it happens rather than after.
+  // Saving a registration now clears these tokens, so this only appears on
+  // profiles that were left this way by an older build.
+  const stranded = w.linked && !w.configured;
+  $("#w-warn").hidden = !stranded;
+  if (stranded) {
+    $("#w-warn-text").textContent =
+      "Connected, but no client ID and secret are saved for this profile — so the " +
+      "link can't be renewed and will stop working when its token expires. Enter " +
+      "this profile's own registration below and save it, then reconnect.";
+  }
+
+  // Four states, and the card should only ever describe the one you're in.
   const setup = $("#w-setup");
   const summary = $("#w-setup-summary");
 
-  if (w.linked) {
+  if (stranded) {
+    // Registration first — Connect can't help until there's one to connect with.
+    setup.hidden = false;
+    if (settle) setup.open = true;
+    summary.textContent = "Registration details — this profile needs its own client ID and secret";
+    $("#w-sub").textContent = "Connected, but not registered.";
+  } else if (w.linked) {
     // Done. Nothing about setting up belongs on screen.
     const when = w.last_sync ? new Date(w.last_sync) : null;
     $("#w-sub").textContent = when
