@@ -3,7 +3,7 @@
 
 use crate::db::Db;
 use crate::import::{self, ImportReport};
-use crate::model::{Entry, Goal, Source, Stats};
+use crate::model::{Entry, GoalView, Source, Stats};
 use crate::stats;
 use crate::withings;
 use axum::{
@@ -37,7 +37,11 @@ pub fn router(app: App) -> Router {
         .route("/api/entries/:date", axum::routing::delete(del_entry))
         .route("/api/stats", get(get_stats))
         .route("/api/series", get(get_series))
-        .route("/api/goal", get(get_goal).put(put_goal))
+        .route("/api/goals", get(list_goals).post(add_goal))
+        .route(
+            "/api/goals/:id",
+            axum::routing::put(update_goal).delete(delete_goal),
+        )
         .route("/api/import", post(post_import))
         .route("/api/export.csv", get(export_csv))
         .route("/api/withings/status", get(w_status))
@@ -106,7 +110,7 @@ async fn del_entry(State(a): State<App>, Path(date): Path<String>) -> ApiResult<
 
 async fn get_stats(State(a): State<App>) -> ApiResult<Json<Stats>> {
     let e = a.db.entries()?;
-    Ok(Json(stats::compute(&e, a.db.goal()?)))
+    Ok(Json(stats::compute(&e, a.db.current_goal()?)))
 }
 
 #[derive(Deserialize)]
@@ -147,13 +151,85 @@ async fn get_series(
     ))
 }
 
-async fn get_goal(State(a): State<App>) -> ApiResult<Json<Goal>> {
-    Ok(Json(a.db.goal()?))
+/// What the goal form actually sends. `start_lb`/`start_date` are usually
+/// left out — the server fills them in from your latest weigh-in, which is
+/// what "starting today" should mean for a freshly declared goal.
+#[derive(Deserialize)]
+pub struct GoalIn {
+    pub target_lb: f64,
+    #[serde(default)]
+    pub target_date: Option<NaiveDate>,
+    #[serde(default)]
+    pub start_lb: Option<f64>,
+    #[serde(default)]
+    pub start_date: Option<NaiveDate>,
 }
 
-async fn put_goal(State(a): State<App>, Json(g): Json<Goal>) -> ApiResult<Json<Goal>> {
-    a.db.set_goal(&g)?;
-    Ok(Json(a.db.goal()?))
+fn views_for(entries: &[Entry], goals: Vec<crate::model::Goal>) -> Vec<GoalView> {
+    let today = chrono::Utc::now().date_naive();
+    stats::goal_views(entries, &goals, today)
+}
+
+/// Every goal, newest first, with its outcome already worked out — hit,
+/// missed, superseded, or still open.
+async fn list_goals(State(a): State<App>) -> ApiResult<Json<Vec<GoalView>>> {
+    let entries = a.db.entries()?;
+    let goals = a.db.goals()?;
+    Ok(Json(views_for(&entries, goals)))
+}
+
+/// Always creates a new goal, which becomes the current one; whatever was
+/// current before falls back into history. Editing an existing goal in
+/// place is `PUT /api/goals/:id`.
+async fn add_goal(State(a): State<App>, Json(b): Json<GoalIn>) -> ApiResult<Json<GoalView>> {
+    let entries = a.db.entries()?;
+    let start_lb = b
+        .start_lb
+        .or_else(|| entries.last().map(|e| e.weight_lb))
+        .ok_or_else(|| anyhow::anyhow!("Log a weigh-in before setting a goal."))?;
+    let start_date = b
+        .start_date
+        .or_else(|| entries.last().map(|e| e.date))
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let saved = a.db.add_goal(b.target_lb, b.target_date, start_lb, start_date)?;
+    let id = saved.id;
+    let goals = a.db.goals()?;
+    let view = views_for(&entries, goals)
+        .into_iter()
+        .find(|v| v.goal.id == id)
+        .expect("goal we just inserted");
+    Ok(Json(view))
+}
+
+async fn update_goal(
+    State(a): State<App>,
+    Path(id): Path<i64>,
+    Json(b): Json<GoalIn>,
+) -> ApiResult<Json<GoalView>> {
+    let existing = a
+        .db
+        .goals()?
+        .into_iter()
+        .find(|g| g.id == id)
+        .ok_or_else(|| anyhow::anyhow!("No such goal."))?;
+    let start_lb = b.start_lb.unwrap_or(existing.start_lb);
+    let start_date = b.start_date.unwrap_or(existing.start_date);
+    a.db.update_goal(id, b.target_lb, b.target_date, start_lb, start_date)?;
+    let entries = a.db.entries()?;
+    let goals = a.db.goals()?;
+    let view = views_for(&entries, goals)
+        .into_iter()
+        .find(|v| v.goal.id == id)
+        .expect("goal we just updated");
+    Ok(Json(view))
+}
+
+async fn delete_goal(State(a): State<App>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    Ok(if a.db.delete_goal(id)? {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    })
 }
 
 #[derive(Deserialize)]

@@ -1,8 +1,8 @@
 # t-fit
 
-A small, fast, local-first, weight tracker — the part of [FitDay PC](https://en.wikipedia.org/wiki/FitDay) (Version 1.0) that I mostly used, rebuilt in Rust in 2026.
+A small, fast, local-first weight tracker — the part of [FitDay PC](https://en.wikipedia.org/wiki/FitDay) that people actually used, rebuilt in Rust and still working in 2026.
 
-FitDay PC was abandoned around 2004 and its online service shut down in 2022. Version 1.0 has no export; unsure on any version after that. If you kept a decade of weigh-ins in it, that data is stuck inside a proprietary binary on a machine running an app that no longer gets updates. t-fit is the way out: one small binary, one SQLite file, a CSV export that works, and an optional Withings sync so a smart scale can keep it fed.
+FitDay PC was abandoned around 2004 and its online service shut down in 2022. It has no export. If you kept a decade of weigh-ins in it, that data is stuck inside a proprietary binary on a machine running an app that no longer gets updates. t-fit is the way out: one small binary, one SQLite file, a CSV export that works, and an optional Withings sync so a smart scale can keep it fed.
 
 - **Local-first.** Your data is a single SQLite file on your own disk. Nothing is uploaded. There is no account and no server to sign up for.
 - **One binary, two front doors.** Run it and an app window opens. Run it with `--serve 0.0.0.0` and you can log a weigh-in from your phone on the same Wi-Fi.
@@ -72,7 +72,7 @@ There is an `Import CSV` button in the UI that does the same thing.
 FitDay PC has no export. t-fit reads its file directly:
 
 ```
-t-fit --import-fitday <name>Fit.fdy
+t-fit --import-fitday MyAccount.fdy
 ```
 
 Dates, weights, and the **full text** of every note — including the ones
@@ -80,7 +80,7 @@ FitDay's own printout truncates at the column width. A `.fbk` backup works
 too.
 
 ```
-read 803 days from <name>Fit.fdy (143 with notes)
+read 803 days from MyAccount.fdy (143 with notes)
   2009-09-14 → 2025-01-23
   added 803, already present 0
 ```
@@ -129,6 +129,7 @@ t-fit --base-url http://192.168.1.20:8787 --serve 0.0.0.0
 - A chart: every reading as a faint dot, a 7-day trend line over the top, a goal line, crosshair and tooltip. The trend line runs unbroken, but a stretch with no weigh-ins for over three weeks is bridged with a dashed segment rather than a solid one — connected, without pretending those weeks were measured.
 - Current, 7-day trend, 30-day change, rate in lb/week (least-squares over 30 days), and how far ahead of or behind your goal pace you are.
 - **A goal pace line**: set a target weight *and date* and the chart draws the straight line from where you started to where you're aiming. Your trend sitting above or below it is the answer to "am I on track?" — which a flat line at the target can't tell you.
+- **Goals keep a history.** Setting a new goal doesn't erase the old one — it becomes a small marker on the chart and a line in the Goal card: hit (green, with how many days early or late), missed (red, deadline passed), or superseded (retired before either happened). Any goal — including the current one — can be edited or deleted from that list.
 - A table view with day-over-day deltas and delete. Notes sit on one line and expand when tapped, so a long note never squeezes the date column on a phone.
 - Light and dark, following your system by default.
 - A settings drawer (☰, top right) for the default time range, which view opens first, whether raw weigh-ins are drawn, and the theme.
@@ -147,7 +148,10 @@ The UI is just a client. Everything it does is available over HTTP, which makes 
 | `DELETE` | `/api/entries/:date` | |
 | `GET` | `/api/stats` | the numbers behind the tiles |
 | `GET` | `/api/series?days=90` | plot-ready points with the 7-day trend |
-| `GET` / `PUT` | `/api/goal` | |
+| `GET` | `/api/goals` | every goal, newest first, with status (active/achieved/missed/superseded) computed fresh from your entries |
+| `POST` | `/api/goals` | `{target_lb, target_date}` — always creates a new goal, which becomes current |
+| `PUT` | `/api/goals/:id` | edit a goal in place — no new history entry |
+| `DELETE` | `/api/goals/:id` | |
 | `POST` | `/api/import?overwrite=false` | CSV body |
 | `GET` | `/api/export.csv` | |
 | `GET` / `PUT` | `/api/prefs` | UI settings, stored as one JSON blob |
@@ -170,7 +174,7 @@ curl -X POST localhost:8787/api/entries \
 ```
 src/model.rs     domain types
 src/db.rs        SQLite; upsert vs. insert-if-absent
-src/stats.rs     moving averages, rate of change, goal projection
+src/stats.rs     moving averages, rate of change, goal pace and outcome
 src/import.rs    tolerant CSV import
 src/fitday.rs    decodes FitDay PC's undocumented .fdy binary
 src/withings.rs  OAuth + measurement sync

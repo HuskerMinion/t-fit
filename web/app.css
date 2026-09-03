@@ -375,6 +375,8 @@ code.block {
   border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2);
 }
 .pill.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.pill.dim { color: var(--ink-3); }
 
 /* A bridged stretch: connected, but visibly not measured. */
 .trend-gap {
@@ -487,6 +489,31 @@ dialog.drawer::backdrop { background: #0009; }
 }
 .goal-line { opacity: .55; stroke-width: 1.5; }
 .swatch.line.solid { background: var(--s2); opacity: 1; }
+
+/* Small markers for past goals — where each one's target sat, coloured by
+   how it turned out. Purely a chart annotation: the history list below
+   the form is where the actual detail lives. */
+.goal-marker { stroke: var(--surface); stroke-width: 1.5; }
+.goal-marker.hit { fill: var(--good); }
+.goal-marker.missed { fill: var(--bad); }
+.goal-marker.superseded { fill: var(--ink-3); }
+
+/* ── goal history ───────────────────────────────────────────── */
+.goal-history {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.goal-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 12px; font-size: 13px;
+}
+.goal-row-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 220px; }
+.goal-row-main .pill { margin-left: 0; }
+.goal-row-text { color: var(--ink); }
+.goal-row-sub { flex: 1 1 100%; order: 3; color: var(--ink-3); font-size: 12px; }
+.goal-row-actions { display: flex; gap: 12px; flex: none; }
+.goal-edit-form { width: 100%; }
 
 /* ── table columns ──────────────────────────────────────────── */
 /* The date is the row's identity — it never wraps. The note gives up its

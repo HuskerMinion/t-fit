@@ -15,7 +15,8 @@ const api = async (path, opts) => {
 const state = {
   entries: [],      // ascending by date
   stats: null,
-  goal: null,
+  goal: null,        // the current goal, or null
+  goalHistory: [],   // every goal, newest first, with computed status
   days: null,       // trailing window; null = all
   view: "chart",
   series: [],       // what's currently plotted
@@ -75,16 +76,18 @@ function deltaClass(n) { return n == null || n === 0 ? "" : n < 0 ? "down" : "up
 
 /* ── load ────────────────────────────────────────────────────── */
 async function load() {
-  const [entries, stats, goal] = await Promise.all([
+  const [entries, stats, goals] = await Promise.all([
     api("/api/entries"),
     api("/api/stats"),
-    api("/api/goal"),
+    api("/api/goals"),
   ]);
   state.entries = entries;
   state.stats = stats;
-  state.goal = goal;
+  state.goal = stats.goal;
+  state.goalHistory = goals;
   renderTiles();
   renderGoalForm();
+  renderGoalHistory();
   applyRange();
   renderTable();
   $("#foot-count").textContent =
@@ -325,6 +328,33 @@ function draw() {
     lgPace.hidden = true;
   }
 
+  // Past goals, as small markers — what you hit, and what you didn't. The
+  // current goal already gets the pace/target lines above, so it's skipped
+  // here; only history needs a marker.
+  for (const g of state.goalHistory || []) {
+    if (g.current) continue;
+    let atISO, cls, title;
+    if (g.status === "achieved" && g.hit_date) {
+      atISO = g.hit_date;
+      cls = "goal-marker hit";
+      title = `Achieved ${lb(g.target_lb)} lb on ${fmtDay(g.hit_date)}`;
+    } else if (g.target_date && (g.status === "missed" || g.status === "superseded")) {
+      atISO = g.target_date;
+      cls = "goal-marker " + (g.status === "missed" ? "missed" : "superseded");
+      title = `${g.status === "missed" ? "Missed" : "Superseded"}: ${lb(g.target_lb)} lb by ${fmtDay(g.target_date)}`;
+    } else {
+      continue;
+    }
+    if (daysBetween(firstISO, atISO) < 0 || daysBetween(atISO, lastISO) < 0) continue;
+    const my = Y(g.target_lb);
+    if (my < M.t || my > M.t + ih) continue;
+    const mk = el("circle", { class: cls, cx: X(atISO).toFixed(1), cy: my.toFixed(1), r: 5 });
+    const ttl = document.createElementNS(SVG, "title");
+    ttl.textContent = title;
+    mk.appendChild(ttl);
+    svg.appendChild(mk);
+  }
+
   // 7-day trend. The line runs unbroken end to end; a stretch with no
   // weigh-ins for over three weeks is bridged with a dashed segment, so it
   // stays connected but doesn't pretend those weeks were measured.
@@ -441,9 +471,108 @@ async function removeEntry(date) {
 
 /* ── goal ────────────────────────────────────────────────────── */
 function renderGoalForm() {
-  if (!state.goal) return;
-  $("#g-target").value = state.goal.target_lb ?? "";
-  $("#g-date").value = state.goal.target_date ?? "";
+  $("#g-target").value = state.goal?.target_lb ?? "";
+  $("#g-date").value = state.goal?.target_date ?? "";
+}
+
+/** Refetch stats + goal history and redraw everything that depends on
+ * them. Used after any add/edit/delete so the tiles, chart and history
+ * list never fall out of sync with each other. */
+async function reloadGoals() {
+  const [stats, goals] = await Promise.all([api("/api/stats"), api("/api/goals")]);
+  state.stats = stats;
+  state.goal = stats.goal;
+  state.goalHistory = goals;
+  renderTiles();
+  renderGoalForm();
+  renderGoalHistory();
+  draw();
+}
+
+const STATUS_LABEL = {
+  active: ["Active", ""],
+  achieved: ["Achieved", "ok"],
+  missed: ["Missed", "bad"],
+  superseded: ["Superseded", "dim"],
+};
+
+function goalRowText(g) {
+  const target = `${lb(g.target_lb)} lb`;
+  const by = g.target_date ? `by ${fmtShort(g.target_date)}` : "no deadline";
+  let outcome = "";
+  if (g.status === "achieved" && g.hit_date) {
+    const early = g.target_date ? daysBetween(g.hit_date, g.target_date) : null;
+    outcome =
+      early == null ? ` — hit ${fmtShort(g.hit_date)}`
+      : early >= 0 ? ` — hit ${fmtShort(g.hit_date)}, ${early}d early`
+      : ` — hit ${fmtShort(g.hit_date)}, ${-early}d late`;
+  }
+  return `${target} ${by}${outcome}`;
+}
+
+/** One history row, rendered fresh each time — no per-row state to patch
+ * up, which keeps edit/cancel/delete trivial: just re-render. */
+function goalRow(g) {
+  const row = document.createElement("div");
+  row.className = "goal-row";
+  const [label, cls] = STATUS_LABEL[g.status] || [g.status, ""];
+  row.innerHTML =
+    `<div class="goal-row-main">` +
+      `<span class="pill${cls ? " " + cls : ""}">${label}</span>` +
+      `<span class="goal-row-text">${goalRowText(g)}</span>` +
+    `</div>` +
+    `<div class="goal-row-actions">` +
+      `<button class="link-btn g-edit" type="button">Edit</button>` +
+      `<button class="link-btn g-del" type="button">Delete</button>` +
+    `</div>` +
+    `<div class="goal-row-sub">from ${lb(g.start_lb)} lb on ${fmtShort(g.start_date)}</div>`;
+  row.querySelector(".g-edit").addEventListener("click", () => editGoalRow(row, g));
+  row.querySelector(".g-del").addEventListener("click", async () => {
+    await api(`/api/goals/${g.id}`, { method: "DELETE" });
+    await reloadGoals();
+  });
+  return row;
+}
+
+function editGoalRow(row, g) {
+  row.innerHTML = `
+    <form class="goal-edit-form">
+      <div class="field">
+        <label>Target <span class="unit">lb</span></label>
+        <input type="number" step="0.1" min="1" max="1500" inputmode="decimal" class="ge-target" value="${g.target_lb}">
+      </div>
+      <div class="field">
+        <label>By <span class="opt">optional</span></label>
+        <input type="date" class="ge-date" value="${g.target_date || ""}">
+      </div>
+      <button type="submit" class="ghost">Save</button>
+      <button type="button" class="ghost ge-cancel">Cancel</button>
+    </form>`;
+  row.querySelector(".goal-edit-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const target_lb = parseFloat(row.querySelector(".ge-target").value);
+    if (!Number.isFinite(target_lb)) return;
+    await api(`/api/goals/${g.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target_lb,
+        target_date: row.querySelector(".ge-date").value || null,
+        start_lb: g.start_lb,
+        start_date: g.start_date,
+      }),
+    });
+    await reloadGoals();
+  });
+  row.querySelector(".ge-cancel").addEventListener("click", renderGoalHistory);
+}
+
+function renderGoalHistory() {
+  const wrap = $("#goal-history");
+  const list = state.goalHistory || [];
+  wrap.hidden = list.length === 0;
+  wrap.innerHTML = "";
+  for (const g of list) wrap.appendChild(goalRow(g));
 }
 
 /* ── wiring ──────────────────────────────────────────────────── */
@@ -503,19 +632,23 @@ function wire() {
 
   $("#goal-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    const t = $("#g-target").value;
+    const target_lb = parseFloat($("#g-target").value);
+    if (!Number.isFinite(target_lb)) {
+      msg("#goal-msg", "Enter a target weight.", "err");
+      return;
+    }
     try {
-      await api("/api/goal", {
-        method: "PUT",
+      // Always a fresh goal: start is wherever you are right now, and
+      // whatever was current before drops into history automatically.
+      await api("/api/goals", {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          target_lb: t === "" ? null : parseFloat(t),
+          target_lb,
           target_date: $("#g-date").value || null,
-          start_lb: state.goal?.start_lb ?? state.stats?.current ?? null,
-          start_date: state.goal?.start_date ?? state.stats?.last ?? null,
         }),
       });
-      await load();
+      await reloadGoals();
       msg("#goal-msg", "Saved.", "ok");
     } catch (e) {
       msg("#goal-msg", e.message, "err");
