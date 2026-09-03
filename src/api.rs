@@ -390,7 +390,7 @@ async fn w_config(
     State(a): State<App>,
     Json(c): Json<withings::Config>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    withings::save_config(&a.db, &c)?;
+    withings::save_config(&a.db, a.db.active_user_id()?, &c)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

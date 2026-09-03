@@ -96,11 +96,18 @@ decoded exactly.
 
 Optional, and off until you set it up. t-fit talks to Withings with your own free developer app, so no credentials of mine (or anyone's) are baked into this repo.
 
-1. Create a free **public** application at [developer.withings.com](https://developer.withings.com/dashboard/).
+**This is per profile.** Withings issues credentials against the account that
+created them, so two people in one household each need their own developer
+application — their own client ID and secret, not one shared pair. Sharing a
+registration is what produces a stubborn `redirect_uri_mismatch` for the second
+person, no matter how carefully the callback URLs are matched.
+
+1. Switch to the profile you're setting up, then create a free **public** application at [developer.withings.com](https://developer.withings.com/dashboard/), signed in as *that person's* Withings account.
 2. Set its callback URL to exactly the one t-fit shows you in the Withings card — `http://127.0.0.1:8787/api/withings/callback` unless you changed the port.
 3. Paste the client ID and secret into t-fit and hit **Connect to Withings**.
+4. Repeat for the next profile with its own application.
 
-The client ID, secret and tokens are stored in the `settings` table of your local database. They are never written to the source tree, and `.gitignore` keeps `*.sqlite3` out of git.
+The client ID, secret and tokens are stored in the `settings` table of your local database, namespaced per profile (`u{id}.withings.*`). They are never written to the source tree, and `.gitignore` keeps `*.sqlite3` out of git. Upgrading from a single-user database moves any existing registration onto the default profile, so nothing has to be re-entered.
 
 Once linked, t-fit syncs in the background on its own — every six hours by
 default, adjustable from hourly to daily (or off) in Settings. It keys off
@@ -115,7 +122,7 @@ If something goes wrong, the reason is kept and shown on the Withings card — i
 curl -s localhost:8787/api/withings/status
 ```
 
-`configured` means the client ID and secret are saved; `linked` means tokens are held and a sync will work.
+`configured` means the client ID and secret are saved; `linked` means tokens are held and a sync will work. Both are reported for whichever profile is currently active.
 
 If you run t-fit behind a different origin, tell it so the redirect matches:
 

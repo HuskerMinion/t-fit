@@ -546,7 +546,12 @@ dialog.drawer::backdrop { background: #0009; }
   gap: 12px; flex-wrap: wrap; padding: 2px 0 12px;
 }
 .w-manage .pref-label { font-size: 14px; font-weight: 500; color: var(--ink); }
+/* Whose Withings this section is showing — quiet, but there, so credentials
+   never get typed into the wrong profile. */
+.w-who { font-weight: 400; color: var(--ink-3); }
 .w-manage-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+/* The per-profile note sits directly above the status line — give them air. */
+.pref-note + .w-manage { padding-top: 12px; }
 
 /* The goal as a path: start → target, then flat. Solid, because it's the
    line you're actually racing; the flat target reference stays dashed and

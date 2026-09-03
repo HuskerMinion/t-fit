@@ -293,7 +293,11 @@
     </section>
 
     <section class="pref-group">
-      <h3>Withings</h3>
+      <h3>Withings <span class="w-who" id="w-who"></span></h3>
+      <p class="pref-note">
+        Withings issues credentials per person, so every profile connects with its
+        own developer application — its own client ID and secret, not a shared one.
+      </p>
 
       <div class="w-manage">
         <span class="pref-label" id="w-sub">Checking…</span>
@@ -317,11 +321,13 @@
       <details id="w-setup">
         <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
         <ol class="steps">
-          <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
+          <li>Sign in to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a>
+            with <em>this profile's own</em> Withings account and create a free application.
+            Don't reuse someone else's — Withings ties the credentials to the account that made them.</li>
           <li>Paste this as the callback URL, exactly:
             <code class="block" id="w-redirect">—</code></li>
           <li>Copy the client ID and secret it gives you into the boxes below. They are stored
-            in your local database and never leave this machine.</li>
+            in your local database, against this profile only, and never leave this machine.</li>
         </ol>
         <form id="w-form" autocomplete="off">
           <div class="field grow">

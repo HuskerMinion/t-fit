@@ -914,7 +914,7 @@ function wire() {
     clearInterval(watchTimer);
     const until = Date.now() + 5 * 60 * 1000;
     watchTimer = setInterval(async () => {
-      const linked = await loadWithings();
+      const linked = await loadWithings({ settle: false });
       if (linked) {
         clearInterval(watchTimer);
         $("#w-fallback").hidden = true;
@@ -934,7 +934,7 @@ function wire() {
 
   $("#w-err-x").addEventListener("click", async () => {
     await api("/api/withings/clear_error", { method: "POST" });
-    loadWithings();
+    loadWithings({ settle: false });
   });
 
   $("#w-sync").addEventListener("click", syncNow);
@@ -1000,8 +1000,14 @@ function wire() {
 /**
  * `#w-sub` lives in Settings, right next to the buttons that act on it, so
  * it just says where things stand — no need to point anywhere else.
+ *
+ * `settle` means "something just changed, so re-frame the whole card":
+ * refill the boxes and decide whether the setup steps are open. Background
+ * polling passes `settle: false`, because a status check that fires every
+ * two seconds must not slam the disclosure shut under someone who just
+ * opened it, or overwrite a client id they're halfway through typing.
  */
-async function loadWithings() {
+async function loadWithings({ settle = true } = {}) {
   let w;
   try { w = await api("/api/withings/status"); }
   catch {
@@ -1011,10 +1017,21 @@ async function loadWithings() {
 
   $("#w-redirect").textContent = w.redirect_uri;
 
+  // Whose Withings this is. With one profile it's noise; with two it's the
+  // difference between saving your credentials and overwriting your wife's.
+  const who = $("#w-who");
+  const active = state.users.find((u) => u.active);
+  who.textContent = state.users.length > 1 && active ? `· ${active.name}` : "";
+
   // Show what's actually stored. The boxes used to come back empty on every
-  // run, which looked exactly like nothing had been saved.
-  if (w.client_id) $("#w-id").value = w.client_id;
+  // run, which looked exactly like nothing had been saved — and they have to
+  // be cleared, not just filled, or switching profiles leaves the previous
+  // person's client id sitting in the box as if it were yours.
   const sec = $("#w-secret");
+  if (settle) {
+    $("#w-id").value = w.client_id || "";
+    sec.value = "";
+  }
   sec.placeholder = w.has_secret ? "•••••••••••• saved" : "…";
   $("#w-saved-hint").hidden = !w.has_secret;
   $("#w-link").hidden = !w.configured || w.linked;
@@ -1039,13 +1056,13 @@ async function loadWithings() {
     // Registered but not linked. The steps are done, so fold them away —
     // Connect lives in this section's header now, not hidden with them.
     setup.hidden = false;
-    setup.open = false;
+    if (settle) setup.open = false;
     summary.textContent = "Registration details — open this to change the client ID or secret";
     $("#w-sub").textContent = "Registered. One step left: Connect to Withings.";
   } else {
     // Nothing saved yet: the steps are the point.
     setup.hidden = false;
-    setup.open = true;
+    if (settle) setup.open = true;
     summary.textContent = "Set it up — one time, about five minutes";
     $("#w-sub").textContent = "Not set up. Pull weigh-ins straight off your scale.";
   }

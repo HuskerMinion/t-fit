@@ -162,11 +162,16 @@ impl Db {
             c.execute("DROP TABLE goal", [])?;
         }
 
-        // Move any pre-multi-user Withings link — tokens, last sync, last
-        // error — onto the default profile, so upgrading doesn't silently
-        // read as "unlinked" until someone reconnects it. Runs once: the
-        // old app-wide keys are gone after the first pass.
+        // Move any pre-multi-user Withings setup — the app registration as
+        // well as the tokens — onto the default profile, so upgrading
+        // doesn't silently read as "not set up" until someone re-enters it.
+        // Withings issues credentials per person, so the client id and
+        // secret belong to whoever was using t-fit before the upgrade, not
+        // to the household. Runs once: the old app-wide keys are gone after
+        // the first pass.
         for key in [
+            "withings.client_id",
+            "withings.client_secret",
             "withings.access_token",
             "withings.refresh_token",
             "withings.expires_at",
@@ -659,10 +664,13 @@ mod tests {
         assert_eq!(goals.len(), 1);
         assert_eq!(goals[0].target_lb, 180.0);
 
-        // App-level config stays global; the tokens move onto the profile.
-        assert_eq!(db.setting("withings.client_id").unwrap().as_deref(), Some("abc123"));
+        // The whole Withings setup moves onto the profile — registration
+        // included, because Withings credentials belong to a person — and
+        // nothing is left behind under the old app-wide keys.
+        assert_eq!(db.user_setting(u, "withings.client_id").unwrap().as_deref(), Some("abc123"));
         assert_eq!(db.user_setting(u, "withings.access_token").unwrap().as_deref(), Some("tok"));
         assert_eq!(db.user_setting(u, "withings.refresh_token").unwrap().as_deref(), Some("ref"));
+        assert!(db.setting("withings.client_id").unwrap().is_none());
         assert!(db.setting("withings.access_token").unwrap().is_none());
 
         // Idempotent: running it again changes nothing further.

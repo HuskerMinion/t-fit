@@ -7,6 +7,11 @@
 //! Nothing here is a secret in the repo sense: your client id and secret come
 //! from your own free developer app and are stored in the local SQLite
 //! `settings` table, never in the source tree.
+//!
+//! Everything Withings-related is per profile, registration included. Withings
+//! hands out credentials per person, not per app: two people linking their own
+//! accounts each need their own developer app, so each profile keeps its own
+//! client id and secret alongside its own tokens.
 
 use crate::db::Db;
 use crate::model::{Entry, Source};
@@ -64,12 +69,12 @@ pub struct SyncReport {
     pub last: Option<String>,
 }
 
-/// Status is always asked for on behalf of one profile — the app
-/// registration (`configured`/`client_id`/`has_secret`) is shared, but
-/// whether *this* person is linked is not.
+/// Status is always asked for on behalf of one profile — registration and
+/// link alike belong to that person, so a profile with nothing saved reads
+/// as "not configured" no matter what anyone else has set up.
 pub fn status(db: &Db, uid: i64) -> Result<Status> {
-    let client_id = db.setting(key::CLIENT_ID)?;
-    let has_secret = db.setting(key::CLIENT_SECRET)?.is_some();
+    let client_id = db.user_setting(uid, key::CLIENT_ID)?;
+    let has_secret = db.user_setting(uid, key::CLIENT_SECRET)?.is_some();
     Ok(Status {
         configured: client_id.is_some() && has_secret,
         client_id,
@@ -90,26 +95,27 @@ pub fn clear_error(db: &Db, uid: i64) -> Result<()> {
     db.del_user_setting(uid, key::LAST_ERROR)
 }
 
-/// Save the registration. An empty secret means "keep the one already
-/// stored", so the client id can be corrected without retyping the secret —
-/// and so a blank box never silently wipes a working setup.
-pub fn save_config(db: &Db, c: &Config) -> Result<()> {
+/// Save one profile's registration. An empty secret means "keep the one
+/// already stored", so the client id can be corrected without retyping the
+/// secret — and so a blank box never silently wipes a working setup.
+pub fn save_config(db: &Db, uid: i64, c: &Config) -> Result<()> {
     let id = c.client_id.trim();
     let secret = c.client_secret.trim();
     if id.is_empty() {
         bail!("a client id is required");
     }
-    if secret.is_empty() && db.setting(key::CLIENT_SECRET)?.is_none() {
+    if secret.is_empty() && db.user_setting(uid, key::CLIENT_SECRET)?.is_none() {
         bail!("a client secret is required the first time");
     }
-    db.set_setting(key::CLIENT_ID, id)?;
+    db.set_user_setting(uid, key::CLIENT_ID, id)?;
     if !secret.is_empty() {
-        db.set_setting(key::CLIENT_SECRET, secret)?;
+        db.set_user_setting(uid, key::CLIENT_SECRET, secret)?;
     }
     Ok(())
 }
 
-/// Forget this profile's tokens (but keep the shared app registration).
+/// Forget this profile's tokens (but keep its saved app registration, so
+/// reconnecting doesn't mean retyping the client id and secret).
 pub fn unlink(db: &Db, uid: i64) -> Result<()> {
     for k in [key::ACCESS, key::REFRESH, key::EXPIRES, key::STATE] {
         db.del_user_setting(uid, k)?;
@@ -127,7 +133,7 @@ pub fn unlink(db: &Db, uid: i64) -> Result<()> {
 /// fresh at callback time.
 pub fn authorize_url(db: &Db, uid: i64, redirect_uri: &str) -> Result<String> {
     let id = db
-        .setting(key::CLIENT_ID)?
+        .user_setting(uid, key::CLIENT_ID)?
         .ok_or_else(|| anyhow!("Withings is not configured yet — save a client id and secret first"))?;
     let state = format!("{uid}:{:x}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
     db.set_user_setting(uid, key::STATE, &state)?;
@@ -183,12 +189,15 @@ fn store_tokens(db: &Db, uid: i64, t: &Tokens) -> Result<()> {
     Ok(())
 }
 
-fn creds(db: &Db) -> Result<(String, String)> {
+/// This profile's own client id and secret. Whose credentials get used has
+/// to follow whose tokens are being minted or refreshed — mixing the two is
+/// what Withings rejects as a `redirect_uri_mismatch`.
+fn creds(db: &Db, uid: i64) -> Result<(String, String)> {
     Ok((
-        db.setting(key::CLIENT_ID)?
-            .ok_or_else(|| anyhow!("no Withings client id saved"))?,
-        db.setting(key::CLIENT_SECRET)?
-            .ok_or_else(|| anyhow!("no Withings client secret saved"))?,
+        db.user_setting(uid, key::CLIENT_ID)?
+            .ok_or_else(|| anyhow!("no Withings client id saved for this profile"))?,
+        db.user_setting(uid, key::CLIENT_SECRET)?
+            .ok_or_else(|| anyhow!("no Withings client secret saved for this profile"))?,
     ))
 }
 
@@ -202,7 +211,7 @@ pub async fn exchange_code(db: &Db, code: &str, state: &str, redirect_uri: &str)
     if expect.is_empty() || expect != state {
         bail!("OAuth state did not match — start the link again from t-fit");
     }
-    let (id, secret) = creds(db)?;
+    let (id, secret) = creds(db, uid)?;
     let res: Envelope<Tokens> = reqwest::Client::new()
         .post(OAUTH_URL)
         .form(&[
@@ -239,7 +248,7 @@ async fn access_token(db: &Db, uid: i64) -> Result<String> {
     let refresh = db
         .user_setting(uid, key::REFRESH)?
         .ok_or_else(|| anyhow!("Withings isn't linked yet"))?;
-    let (id, secret) = creds(db)?;
+    let (id, secret) = creds(db, uid)?;
     let res: Envelope<Tokens> = reqwest::Client::new()
         .post(OAUTH_URL)
         .form(&[
@@ -367,6 +376,48 @@ mod tests {
             serde_json::from_str(r#"{"status":401,"error":"invalid_token"}"#).unwrap();
         let err = unwrap_envelope(e, "test").unwrap_err().to_string();
         assert!(err.contains("401") && err.contains("invalid_token"), "{err}");
+    }
+
+    /// The bug this guards against: one shared registration meant the second
+    /// person to link overwrote the first person's client id and secret, and
+    /// then authorized against credentials that weren't theirs — which is
+    /// what Withings bounces as `redirect_uri_mismatch`.
+    #[test]
+    fn each_profile_keeps_its_own_registration() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db.users().unwrap()[0].id;
+        let b = db.create_user("Wife").unwrap().id;
+
+        save_config(&db, a, &Config { client_id: "id-a".into(), client_secret: "sec-a".into() }).unwrap();
+        save_config(&db, b, &Config { client_id: "id-b".into(), client_secret: "sec-b".into() }).unwrap();
+
+        assert_eq!(creds(&db, a).unwrap(), ("id-a".into(), "sec-a".into()));
+        assert_eq!(creds(&db, b).unwrap(), ("id-b".into(), "sec-b".into()));
+        assert!(status(&db, a).unwrap().configured);
+        assert_eq!(status(&db, a).unwrap().client_id.as_deref(), Some("id-a"));
+
+        // The authorize URL has to carry *this* profile's client id.
+        let url = authorize_url(&db, b, "https://example.test/cb").unwrap();
+        assert!(url.contains("client_id=id-b"), "{url}");
+
+        // An empty secret still means "keep mine" — and doesn't reach across.
+        save_config(&db, b, &Config { client_id: "id-b2".into(), client_secret: String::new() }).unwrap();
+        assert_eq!(creds(&db, b).unwrap(), ("id-b2".into(), "sec-b".into()));
+        assert_eq!(creds(&db, a).unwrap(), ("id-a".into(), "sec-a".into()));
+    }
+
+    /// A brand-new profile starts from nothing, rather than inheriting
+    /// whoever set up Withings first.
+    #[test]
+    fn a_new_profile_is_not_configured() {
+        let db = Db::open_in_memory().unwrap();
+        let a = db.users().unwrap()[0].id;
+        save_config(&db, a, &Config { client_id: "id-a".into(), client_secret: "sec-a".into() }).unwrap();
+
+        let b = db.create_user("Wife").unwrap().id;
+        let s = status(&db, b).unwrap();
+        assert!(!s.configured && !s.has_secret && s.client_id.is_none());
+        assert!(creds(&db, b).is_err());
     }
 
     #[test]
