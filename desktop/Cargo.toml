@@ -1,0 +1,19 @@
+# Optional native shell. Not part of the root build — `cargo build` at the
+# repo root never touches this, so the server crate stays buildable on a
+# machine with no WebView toolchain installed.
+[package]
+name = "t-fit-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Its own workspace root, so it is never pulled into a root-level build.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+t-fit = { path = ".." }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt-multi-thread"] }

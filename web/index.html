@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10131a">
+<title>t-fit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237c5cff'/%3E%3Cstop offset='100%25' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='13' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M24 20v11c0 4.5 2 6.5 6 8' stroke-width='5.5'/%3E%3Cpath d='M12 19.5h24' stroke-width='5.5'/%3E%3Cpath d='M8 13v13M40 13v13' stroke-width='4.5'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="t-fit">
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-palette="#3987e5,#d95926">
+
+<!-- Background pattern. Purely decorative, so it's hidden from screen
+     readers and never intercepts a click. -->
+<svg class="bg-fit" aria-hidden="true" focusable="false">
+  <defs>
+    <pattern id="fitpat" width="360" height="360" patternUnits="userSpaceOnUse" patternTransform="rotate(-8)">
+      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+        <!-- dumbbell -->
+        <g transform="translate(10,14) rotate(-14)">
+          <rect x="4" y="12" width="7" height="16" rx="2.5"/>
+          <rect x="29" y="12" width="7" height="16" rx="2.5"/>
+          <path d="M11 20H29M2 15.5v9M38 15.5v9"/>
+        </g>
+
+        <!-- heart -->
+        <g transform="translate(146,36) rotate(9)">
+          <path d="M20 34C6 24 4 12 12 8c5-2.5 8 2 8 4 0-2 3-6.5 8-4 8 4 6 16-8 26Z"/>
+        </g>
+
+        <!-- heart-rate trace -->
+        <g transform="translate(244,18) rotate(-4)">
+          <path d="M0 20h11l5-11 7 22 5-11h12"/>
+        </g>
+
+        <!-- water drop -->
+        <g transform="translate(56,126) rotate(6)">
+          <path d="M20 5s11 12.5 11 20a11 11 0 0 1-22 0C9 17.5 20 5 20 5Z"/>
+        </g>
+
+        <!-- stopwatch -->
+        <g transform="translate(176,140) rotate(-10)">
+          <circle cx="20" cy="24" r="12"/>
+          <path d="M16 5h8M20 5v7M20 24l6-6"/>
+        </g>
+
+        <!-- bicycle -->
+        <g transform="translate(274,116) rotate(5)">
+          <circle cx="9" cy="28" r="8"/>
+          <circle cx="33" cy="28" r="8"/>
+          <path d="M9 28l8-14h9M17 14l7 14h9M24 28h-2"/>
+        </g>
+
+        <!-- bathroom scale -->
+        <g transform="translate(26,244) rotate(-6)">
+          <rect x="5" y="7" width="30" height="28" rx="5"/>
+          <path d="M12 26a8 8 0 0 1 16 0M20 26l5-5"/>
+        </g>
+
+        <!-- apple -->
+        <g transform="translate(148,256) rotate(8)">
+          <path d="M20 14c-4-4-11-2-11 7 0 8 5 14 11 14s11-6 11-14c0-9-7-11-11-7Z"/>
+          <path d="M20 14V7M20 9c3-3 6-3 7-3 0 3-2 6-7 5Z"/>
+        </g>
+
+        <!-- kettlebell -->
+        <g transform="translate(268,240) rotate(-7)">
+          <circle cx="20" cy="26" r="10"/>
+          <path d="M14 18a6 6 0 0 1 12 0"/>
+        </g>
+
+      </g>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#fitpat)" stroke="none"/>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 48 48" role="img" aria-label="t-fit">
+      <defs>
+        <linearGradient id="markgrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="var(--accent-a)"/>
+          <stop offset="100%" stop-color="var(--accent-b)"/>
+        </linearGradient>
+      </defs>
+      <rect width="48" height="48" rx="13" fill="url(#markgrad)"/>
+      <!-- The T is a barbell: crossbar and plates up top, and the stem
+           sweeps away like the line on a chart heading down. -->
+      <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M24 20v11c0 4.5 2 6.5 6 8" stroke-width="5.5"/>
+        <path d="M12 19.5h24" stroke-width="5.5"/>
+        <path d="M8 13v13M40 13v13" stroke-width="4.5"/>
+      </g>
+    </svg>
+    <h1>t-fit</h1>
+  </div>
+  <div class="topbar-actions">
+    <button id="btn-theme" class="icon-btn" title="Toggle light / dark" aria-label="Toggle light or dark mode">◐</button>
+    <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Open settings">☰</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── quick entry ─────────────────────────────────────────── -->
+  <section class="card entry-card">
+    <form id="entry-form" autocomplete="off">
+      <div class="field">
+        <label for="f-date">Date</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="field">
+        <label for="f-weight">Weight <span class="unit">lb</span></label>
+        <input type="number" id="f-weight" step="0.1" min="1" max="1500" inputmode="decimal" required placeholder="0.0">
+      </div>
+      <div class="field grow">
+        <label for="f-memo">Note <span class="opt">optional</span></label>
+        <input type="text" id="f-memo" maxlength="500" placeholder="How the day went…">
+      </div>
+      <button type="submit" class="primary" id="f-submit">Log it</button>
+    </form>
+    <p class="form-msg" id="entry-msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- ── stat tiles ──────────────────────────────────────────── -->
+  <section class="tiles" id="tiles" aria-label="Summary">
+    <div class="tile hero">
+      <div class="tile-label">Current</div>
+      <div class="tile-value" id="s-current">—</div>
+      <div class="tile-sub" id="s-current-sub">no data yet</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">7-day trend</div>
+      <div class="tile-value" id="s-trend">—</div>
+      <div class="tile-sub" id="s-trend-sub">smoothed</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Last 30 days</div>
+      <div class="tile-value" id="s-30">—</div>
+      <div class="tile-sub" id="s-30-sub">change</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Rate</div>
+      <div class="tile-value" id="s-rate">—</div>
+      <div class="tile-sub">lb / week, 30-day fit</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">To goal</div>
+      <div class="tile-value" id="s-goal">—</div>
+      <div class="tile-sub" id="s-goal-sub">set a goal below</div>
+    </div>
+  </section>
+
+  <!-- ── chart ───────────────────────────────────────────────── -->
+  <section class="card chart-card">
+    <div class="card-head">
+      <div>
+        <h2>Weight over time</h2>
+        <p class="card-sub" id="chart-sub">—</p>
+      </div>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Time range">
+          <button data-days="7" class="on">1W</button>
+          <button data-days="30">1M</button>
+          <button data-days="90">3M</button>
+          <button data-days="365">1Y</button>
+          <button data-days="1825">5Y</button>
+          <button data-days="">All</button>
+        </div>
+        <div class="seg" role="group" aria-label="View">
+          <button data-view="chart" class="on">Chart</button>
+          <button data-view="table">Table</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="view-chart">
+      <div class="legend" id="legend">
+        <span class="lg"><i class="swatch s1"></i>Daily weigh-in</span>
+        <span class="lg"><i class="swatch s1 line"></i>7-day trend</span>
+        <span class="lg" id="lg-gap" hidden><i class="swatch s1 line dash"></i>No weigh-ins</span>
+        <span class="lg" id="lg-pace" hidden><i class="swatch s2 line solid"></i>Goal pace</span>
+        <span class="lg" id="lg-goal" hidden><i class="swatch s2 line"></i>Target</span>
+        <span class="lg"><i class="swatch note"></i>Has a note</span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart" role="img" aria-label="Line chart of body weight over time"></svg>
+        <div class="tooltip" id="tip" hidden></div>
+      </div>
+      <p class="empty" id="chart-empty" hidden>No entries in this range yet.</p>
+    </div>
+
+    <div id="view-table" hidden>
+      <div class="table-wrap">
+        <table id="tbl">
+          <thead><tr><th>Date</th><th class="num">Weight</th><th class="num">Δ</th><th>Note</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="table-more" id="tbl-more" hidden></p>
+    </div>
+  </section>
+
+  <!-- ── goal + data ─────────────────────────────────────────── -->
+  <div class="two-up">
+    <section class="card">
+      <div class="card-head"><h2>Goal</h2></div>
+      <form id="goal-form" autocomplete="off">
+        <div class="field">
+          <label for="g-target">Target weight <span class="unit">lb</span></label>
+          <input type="number" id="g-target" step="0.1" min="1" max="1500" inputmode="decimal" placeholder="—">
+        </div>
+        <div class="field">
+          <label for="g-date">Target date <span class="opt">optional</span></label>
+          <input type="date" id="g-date">
+        </div>
+        <button type="submit" class="ghost">Save goal</button>
+        <p class="form-msg" id="goal-msg" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Your data</h2></div>
+      <p class="muted small">
+        Everything lives in one SQLite file on this machine. Nothing is uploaded anywhere.
+      </p>
+      <div class="row-btns">
+        <a class="ghost btn" href="/api/export.csv" download>Export CSV</a>
+        <label class="ghost btn">
+          Import CSV<input type="file" id="imp-file" accept=".csv,text/csv" hidden>
+        </label>
+      </div>
+      <p class="form-msg" id="imp-msg" role="status" aria-live="polite"></p>
+      <p class="muted small">
+        Import accepts <code>date,weight_lb,memo</code> — and the raw Withings
+        <code>weight.csv</code> as-is. Existing days are kept, not overwritten.
+      </p>
+    </section>
+  </div>
+
+  <!-- ── withings ────────────────────────────────────────────── -->
+  <section class="card" id="wcard">
+    <div class="card-head">
+      <div>
+        <h2>Withings sync</h2>
+        <p class="card-sub" id="w-sub">Checking…</p>
+      </div>
+      <div class="controls">
+        <button class="primary" id="w-link" hidden>Connect to Withings</button>
+        <button class="ghost" id="w-sync" hidden>Sync now</button>
+        <button class="ghost" id="w-unlink" hidden>Unlink</button>
+      </div>
+    </div>
+
+    <p class="banner err" id="w-err" hidden>
+      <span id="w-err-text"></span>
+      <button class="link-btn" id="w-err-x" aria-label="Dismiss">Dismiss</button>
+    </p>
+
+    <p class="fallback" id="w-fallback" hidden>
+      If no Withings tab opened, use this link:
+      <a id="w-authlink" href="#" target="_blank" rel="noopener noreferrer">open the Withings approval page</a>
+    </p>
+
+    <details id="w-setup">
+      <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
+      <ol class="steps">
+        <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
+        <li>Paste this as the callback URL, exactly:
+          <code class="block" id="w-redirect">—</code></li>
+        <li>Copy the client ID and secret it gives you into the boxes below. They are stored
+          in your local database and never leave this machine.</li>
+      </ol>
+      <form id="w-form" autocomplete="off">
+        <div class="field grow">
+          <label for="w-id">Client ID</label>
+          <input type="text" id="w-id" spellcheck="false" placeholder="…">
+        </div>
+        <div class="field grow">
+          <label for="w-secret">Client secret</label>
+          <input type="password" id="w-secret" spellcheck="false" placeholder="…">
+        </div>
+        <button type="submit" class="ghost">Save</button>
+        <p class="form-msg" id="w-saved-hint" hidden>
+          Saved on this machine. Leave the secret blank to keep the one already stored.
+        </p>
+      </form>
+    </details>
+    <p class="form-msg" id="w-msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <footer class="foot">
+    <span id="foot-count">—</span>
+    <span class="dot">·</span>
+    <span>t-fit</span>
+    <span class="dot">·</span>
+    <span id="foot-build">—</span>
+  </footer>
+</main>
+
+<dialog id="settings" class="drawer" aria-label="Settings">
+  <form method="dialog" class="drawer-head">
+    <h2>Settings</h2>
+    <button class="icon-btn" value="close" aria-label="Close settings">✕</button>
+  </form>
+
+  <div class="drawer-body">
+    <section class="pref-group">
+      <h3>Chart</h3>
+
+      <label class="pref" for="p-range">
+        <span class="pref-label">Default time range
+          <small>What the chart shows when t-fit opens</small></span>
+        <select id="p-range">
+          <option value="7">Last week</option>
+          <option value="30">Last month</option>
+          <option value="90">Last 3 months</option>
+          <option value="180">Last 6 months</option>
+          <option value="365">Last year</option>
+          <option value="1825">Last 5 years</option>
+          <option value="all">Everything</option>
+        </select>
+      </label>
+
+      <label class="pref" for="p-view">
+        <span class="pref-label">Open on
+          <small>Chart or the table of entries</small></span>
+        <select id="p-view">
+          <option value="chart">Chart</option>
+          <option value="table">Table</option>
+        </select>
+      </label>
+
+      <label class="pref" for="p-dots">
+        <span class="pref-label">Show individual weigh-ins
+          <small>Faint dots behind the trend line</small></span>
+        <input type="checkbox" id="p-dots">
+      </label>
+    </section>
+
+    <section class="pref-group">
+      <h3>Withings</h3>
+      <label class="pref" for="p-sync">
+        <span class="pref-label">Sync automatically
+          <small>How often to pull new weigh-ins in the background</small></span>
+        <select id="p-sync">
+          <option value="1">Every hour</option>
+          <option value="3">Every 3 hours</option>
+          <option value="6">Every 6 hours</option>
+          <option value="12">Every 12 hours</option>
+          <option value="24">Once a day</option>
+          <option value="0">Never — only when I ask</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="pref-group">
+      <h3>Your data</h3>
+      <p class="pref-label" style="font-weight:400">
+        Everything — history, goal, settings and your Withings link — is this
+        one file. Copy it and you've copied the lot.
+      </p>
+      <code class="block" id="p-dbpath">—</code>
+    </section>
+
+    <section class="pref-group">
+      <h3>Appearance</h3>
+      <label class="pref" for="p-theme">
+        <span class="pref-label">Theme</span>
+        <select id="p-theme">
+          <option value="system">Follow system</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+    </section>
+
+    <p class="pref-note">
+      Settings live in your t-fit database, not this browser — so they apply
+      on your phone too when you run <code>--serve 0.0.0.0</code>.
+    </p>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

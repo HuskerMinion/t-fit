@@ -1,0 +1,21 @@
+# Line endings, settled once.
+#
+# This project is edited on Windows and runs on Linux. Letting the two
+# disagree is how a shebang line ends up with a stray carriage return and a
+# script mysteriously refuses to execute. Everything text is LF, everywhere.
+* text=auto eol=lf
+
+# Windows batch files are the one thing that genuinely wants CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary — git must never rewrite a byte of these.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.webp binary
+*.pdf  binary
+*.tgz  binary
+*.sqlite3 binary
+*.fdy  binary
+*.fbk  binary

@@ -1,0 +1,28 @@
+/target
+/desktop/target
+/desktop/gen
+
+# Your data and your credentials. Never commit these.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+/data/*.csv
+/data/*.json
+
+# Personal exports and anything pulled out of FitDay
+*.fdy
+*.fbk
+weight_history.*
+
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Transfer archives
+_*.tgz
+
+# Personal setup notes — hostnames, paths, tailnet details
+MY-SETUP.md
