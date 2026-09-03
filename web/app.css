@@ -10,7 +10,7 @@
 
   --ink: #eaecef;
   --ink-2: #b0b7be;
-  --ink-3: #7f868e;
+  --ink-3: #99a2aa;
 
   --s1: #4d93e8;
   --s1-soft: #4d93e81f;
@@ -41,7 +41,7 @@ html[data-theme="light"] {
 
   --ink: #171b24;
   --ink-2: #4d566a;
-  --ink-3: #7e879a;
+  --ink-3: #5f687a;
 
   --s1: #2a78d6;
   --s1-soft: #2a78d61a;
@@ -161,12 +161,12 @@ main {
   gap: 16px; flex-wrap: wrap; margin-bottom: 12px;
 }
 .card-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-3); }
-.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 /* ── forms ──────────────────────────────────────────────────── */
 form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 130px; }
 .field.grow { flex: 1 1 220px; }
+.field.grow-note { flex: 1 1 160px; max-width: 300px; }
 label { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
 label .unit, label .opt { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .8; }
 
@@ -340,12 +340,11 @@ code {
 @media (max-width: 860px) {
   .tiles { grid-template-columns: repeat(2, 1fr); }
   .tile.hero { grid-column: 1 / -1; }
-  .two-up { grid-template-columns: 1fr; }
   #chart { height: 300px; }
 }
 @media (max-width: 560px) {
   main { padding-top: 14px; gap: 14px; }
-  .field, .field.grow { flex: 1 1 100%; min-width: 0; }
+  .field, .field.grow, .field.grow-note { flex: 1 1 100%; min-width: 0; }
   #entry-form .primary { width: 100%; }
   .card-head { flex-direction: column; }
   #chart { height: 260px; }

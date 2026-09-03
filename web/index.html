@@ -120,13 +120,64 @@
         <label for="f-weight">Weight <span class="unit">lb</span></label>
         <input type="number" id="f-weight" step="0.1" min="1" max="1500" inputmode="decimal" required placeholder="0.0">
       </div>
-      <div class="field grow">
+      <div class="field grow-note">
         <label for="f-memo">Note <span class="opt">optional</span></label>
         <input type="text" id="f-memo" maxlength="500" placeholder="How the day went…">
       </div>
       <button type="submit" class="primary" id="f-submit">Log it</button>
     </form>
     <p class="form-msg" id="entry-msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- ── withings ────────────────────────────────────────────── -->
+  <section class="card" id="wcard">
+    <div class="card-head">
+      <div>
+        <h2>Withings sync</h2>
+        <p class="card-sub" id="w-sub">Checking…</p>
+      </div>
+      <div class="controls">
+        <button class="primary" id="w-link" hidden>Connect to Withings</button>
+        <button class="ghost" id="w-sync" hidden>Sync now</button>
+        <button class="ghost" id="w-unlink" hidden>Unlink</button>
+      </div>
+    </div>
+
+    <p class="banner err" id="w-err" hidden>
+      <span id="w-err-text"></span>
+      <button class="link-btn" id="w-err-x" aria-label="Dismiss">Dismiss</button>
+    </p>
+
+    <p class="fallback" id="w-fallback" hidden>
+      If no Withings tab opened, use this link:
+      <a id="w-authlink" href="#" target="_blank" rel="noopener noreferrer">open the Withings approval page</a>
+    </p>
+
+    <details id="w-setup">
+      <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
+      <ol class="steps">
+        <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
+        <li>Paste this as the callback URL, exactly:
+          <code class="block" id="w-redirect">—</code></li>
+        <li>Copy the client ID and secret it gives you into the boxes below. They are stored
+          in your local database and never leave this machine.</li>
+      </ol>
+      <form id="w-form" autocomplete="off">
+        <div class="field grow">
+          <label for="w-id">Client ID</label>
+          <input type="text" id="w-id" spellcheck="false" placeholder="…">
+        </div>
+        <div class="field grow">
+          <label for="w-secret">Client secret</label>
+          <input type="password" id="w-secret" spellcheck="false" placeholder="…">
+        </div>
+        <button type="submit" class="ghost">Save</button>
+        <p class="form-msg" id="w-saved-hint" hidden>
+          Saved on this machine. Leave the secret blank to keep the one already stored.
+        </p>
+      </form>
+    </details>
+    <p class="form-msg" id="w-msg" role="status" aria-live="polite"></p>
   </section>
 
   <!-- ── stat tiles ──────────────────────────────────────────── -->
@@ -208,92 +259,21 @@
     </div>
   </section>
 
-  <!-- ── goal + data ─────────────────────────────────────────── -->
-  <div class="two-up">
-    <section class="card">
-      <div class="card-head"><h2>Goal</h2></div>
-      <form id="goal-form" autocomplete="off">
-        <div class="field">
-          <label for="g-target">Target weight <span class="unit">lb</span></label>
-          <input type="number" id="g-target" step="0.1" min="1" max="1500" inputmode="decimal" placeholder="—">
-        </div>
-        <div class="field">
-          <label for="g-date">Target date <span class="opt">optional</span></label>
-          <input type="date" id="g-date">
-        </div>
-        <button type="submit" class="ghost">Save goal</button>
-        <p class="form-msg" id="goal-msg" role="status" aria-live="polite"></p>
-      </form>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>Your data</h2></div>
-      <p class="muted small">
-        Everything lives in one SQLite file on this machine. Nothing is uploaded anywhere.
-      </p>
-      <div class="row-btns">
-        <a class="ghost btn" href="/api/export.csv" download>Export CSV</a>
-        <label class="ghost btn">
-          Import CSV<input type="file" id="imp-file" accept=".csv,text/csv" hidden>
-        </label>
+  <!-- ── goal ────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Goal</h2></div>
+    <form id="goal-form" autocomplete="off">
+      <div class="field">
+        <label for="g-target">Target weight <span class="unit">lb</span></label>
+        <input type="number" id="g-target" step="0.1" min="1" max="1500" inputmode="decimal" placeholder="—">
       </div>
-      <p class="form-msg" id="imp-msg" role="status" aria-live="polite"></p>
-      <p class="muted small">
-        Import accepts <code>date,weight_lb,memo</code> — and the raw Withings
-        <code>weight.csv</code> as-is. Existing days are kept, not overwritten.
-      </p>
-    </section>
-  </div>
-
-  <!-- ── withings ────────────────────────────────────────────── -->
-  <section class="card" id="wcard">
-    <div class="card-head">
-      <div>
-        <h2>Withings sync</h2>
-        <p class="card-sub" id="w-sub">Checking…</p>
+      <div class="field">
+        <label for="g-date">Target date <span class="opt">optional</span></label>
+        <input type="date" id="g-date">
       </div>
-      <div class="controls">
-        <button class="primary" id="w-link" hidden>Connect to Withings</button>
-        <button class="ghost" id="w-sync" hidden>Sync now</button>
-        <button class="ghost" id="w-unlink" hidden>Unlink</button>
-      </div>
-    </div>
-
-    <p class="banner err" id="w-err" hidden>
-      <span id="w-err-text"></span>
-      <button class="link-btn" id="w-err-x" aria-label="Dismiss">Dismiss</button>
-    </p>
-
-    <p class="fallback" id="w-fallback" hidden>
-      If no Withings tab opened, use this link:
-      <a id="w-authlink" href="#" target="_blank" rel="noopener noreferrer">open the Withings approval page</a>
-    </p>
-
-    <details id="w-setup">
-      <summary id="w-setup-summary">Set it up — one time, about five minutes</summary>
-      <ol class="steps">
-        <li>Go to <a href="https://developer.withings.com/dashboard/" target="_blank" rel="noopener noreferrer">developer.withings.com</a> and create a free application.</li>
-        <li>Paste this as the callback URL, exactly:
-          <code class="block" id="w-redirect">—</code></li>
-        <li>Copy the client ID and secret it gives you into the boxes below. They are stored
-          in your local database and never leave this machine.</li>
-      </ol>
-      <form id="w-form" autocomplete="off">
-        <div class="field grow">
-          <label for="w-id">Client ID</label>
-          <input type="text" id="w-id" spellcheck="false" placeholder="…">
-        </div>
-        <div class="field grow">
-          <label for="w-secret">Client secret</label>
-          <input type="password" id="w-secret" spellcheck="false" placeholder="…">
-        </div>
-        <button type="submit" class="ghost">Save</button>
-        <p class="form-msg" id="w-saved-hint" hidden>
-          Saved on this machine. Leave the secret blank to keep the one already stored.
-        </p>
-      </form>
-    </details>
-    <p class="form-msg" id="w-msg" role="status" aria-live="polite"></p>
+      <button type="submit" class="ghost">Save goal</button>
+      <p class="form-msg" id="goal-msg" role="status" aria-live="polite"></p>
+    </form>
   </section>
 
   <footer class="foot">
@@ -368,6 +348,18 @@
         one file. Copy it and you've copied the lot.
       </p>
       <code class="block" id="p-dbpath">—</code>
+
+      <div class="row-btns">
+        <a class="ghost btn" href="/api/export.csv" download>Export CSV</a>
+        <label class="ghost btn">
+          Import CSV<input type="file" id="imp-file" accept=".csv,text/csv" hidden>
+        </label>
+      </div>
+      <p class="form-msg" id="imp-msg" role="status" aria-live="polite"></p>
+      <p class="muted small">
+        Import accepts <code>date,weight_lb,memo</code> — and the raw Withings
+        <code>weight.csv</code> as-is. Existing days are kept, not overwritten.
+      </p>
     </section>
 
     <section class="pref-group">
