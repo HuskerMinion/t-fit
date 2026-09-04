@@ -31,3 +31,6 @@ Claude outputs/
 # Python bytecode from the tools/ scripts
 __pycache__/
 *.pyc
+
+# Session handoff for resuming in a new chat — same reason as MY-SETUP.md
+HANDOFF.md
