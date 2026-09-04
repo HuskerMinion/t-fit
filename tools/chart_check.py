@@ -79,27 +79,43 @@ def main():
         page.wait_for_timeout(500)
         check("and can be restored after one", series_present(page, "fat-line"))
 
-        # ── the current tile carries body fat ────────────────────────
+        # ── the hero tile: two labelled figures, shown as equals ─────
         check("body fat shows beside the current weight",
-              not page.eval_on_selector("#s-current-fat", "e => e.hidden"))
+              not page.eval_on_selector("#s-current-fat-wrap", "e => e.hidden"))
         fat_now = page.inner_text("#s-current-fat")
         check("and reads as a percentage", fat_now.endswith("%"), fat_now)
+        labels = [t.inner_text().strip().lower() for t in page.locator(".hero-fig .tile-label").all()]
+        check("both figures are labelled",
+              any("weight" in t for t in labels) and any("body fat" in t for t in labels), labels)
+        wsize, fsize = (page.eval_on_selector(k, "e => getComputedStyle(e).fontSize")
+                        for k in ["#s-current", "#s-current-fat"])
+        check("they're the same size", wsize == fsize, f"{wsize} vs {fsize}")
+        wcol, fcol = (page.eval_on_selector(k, "e => getComputedStyle(e).color")
+                      for k in ["#s-current", "#s-current-fat"])
+        check("and the same colour", wcol == fcol, f"{wcol} vs {fcol}")
+        # The stepper should span the tile it governs, not sit in a corner.
+        navw = page.eval_on_selector("#daynav", "e => e.getBoundingClientRect().width")
+        tilew = page.eval_on_selector(".tile.hero", "e => e.clientWidth")
+        check("the day nav spans the hero tile", abs(navw - (tilew - 28)) < 4, f"{navw} vs {tilew}")
+        bh = page.eval_on_selector("#day-prev", "e => e.getBoundingClientRect().height")
+        check("its buttons are big enough to hit", bh >= 32, bh)
 
         # ── stepping back ────────────────────────────────────────────
         check("the day nav is visible", not page.eval_on_selector("#daynav", "e => e.hidden"))
-        check("it starts on the latest", page.inner_text("#day-label") == "Latest weigh-in",
+        check("it names the day it's showing", "," in page.inner_text("#day-label"),
               page.inner_text("#day-label"))
+        check("and says that day is the newest",
+              page.inner_text("#s-current-sub") == "Latest weigh-in", page.inner_text("#s-current-sub"))
         check("you can't step past the newest day", page.eval_on_selector("#day-next", "e => e.disabled"))
 
         latest = {k: page.inner_text(k) for k in ["#s-current", "#s-trend", "#s-30", "#s-rate", "#s-goal"]}
+        latest_label = page.inner_text("#day-label")
         page.click("#day-prev")
         page.wait_for_timeout(700)
         check("the label names the day you moved to",
-              page.inner_text("#day-label") != "Latest weigh-in", page.inner_text("#day-label"))
-        # The label is styled uppercase, so compare case-insensitively.
-        check("the hero tile relabels itself",
-              page.inner_text("#s-current-label").lower() == "that day",
-              page.inner_text("#s-current-label"))
+              page.inner_text("#day-label") != latest_label, page.inner_text("#day-label"))
+        check("and it no longer claims to be the newest",
+              page.inner_text("#s-current-sub") == "", repr(page.inner_text("#s-current-sub")))
         check("a way back appears", not page.eval_on_selector("#day-today", "e => e.hidden"))
 
         # Step back to the very first weigh-in. The seeded weights fall in a
@@ -160,7 +176,8 @@ def main():
         # ── back to the present ──────────────────────────────────────
         page.click("#day-today")
         page.wait_for_timeout(700)
-        check("back to latest restores the label", page.inner_text("#day-label") == "Latest weigh-in")
+        check("back to latest restores the newest day", page.inner_text("#day-label") == latest_label,
+              page.inner_text("#day-label"))
         now = {k: page.inner_text(k) for k in latest}
         check("and restores every figure", now == latest, f"{now} vs {latest}")
 
@@ -169,7 +186,7 @@ def main():
         page.mouse.click(box["x"] + box["width"] * 0.2, box["y"] + box["height"] / 2)
         page.wait_for_timeout(700)
         check("clicking a weigh-in selects that day",
-              page.inner_text("#day-label") != "Latest weigh-in", page.inner_text("#day-label"))
+              page.inner_text("#day-label") != latest_label, page.inner_text("#day-label"))
 
         # ── tooltip extras ───────────────────────────────────────────
         page.mouse.move(box["x"] + box["width"] * 0.3, box["y"] + box["height"] / 2)

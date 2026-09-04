@@ -212,7 +212,7 @@ form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .field.grow { flex: 1 1 220px; }
 .field.grow-note { flex: 1 1 160px; max-width: 300px; }
 label { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
-label .unit, label .opt { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .8; }
+label .unit, label .opt, .tile-label .unit { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .8; }
 
 input[type=date], input[type=number], input[type=text], input[type=password] {
   font: inherit; color: var(--ink);
@@ -260,7 +260,9 @@ button:disabled { opacity: .55; cursor: default; }
 .form-msg.ok { color: var(--good); }
 
 /* ── tiles ──────────────────────────────────────────────────── */
-.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+/* The hero carries two figures and the day stepper, so it gets more of the
+   row than an even fifth would give it. */
+.tiles { display: grid; grid-template-columns: 1.75fr repeat(4, 1fr); gap: 12px; }
 .tile {
   background: linear-gradient(168deg,
     color-mix(in srgb, var(--accent-a) 5%, var(--surface)) 0%, var(--surface) 60%);
@@ -282,39 +284,47 @@ button:disabled { opacity: .55; cursor: default; }
   font-size: 26px; font-weight: 640; letter-spacing: -0.02em;
   margin-top: 5px; font-variant-numeric: tabular-nums;
 }
-.tile.hero .tile-value { font-size: 34px; color: var(--ink); }
+.tile.hero { text-align: center; }
+.tile.hero .tile-value { font-size: 32px; color: var(--ink); }
 .tile-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
-/* Body fat sits beside the weight, deliberately smaller: same morning, same
-   body, but the weight is still the headline. Violet ties it to its line on
-   the chart. */
-.tile-fat {
-  margin-left: 9px; font-size: 17px; font-weight: 600;
-  color: var(--accent-a); letter-spacing: -0.01em;
-}
+
+/* Weight and body fat, side by side and equal. The violet that ties the
+   chart line to its axis is too low-contrast to read at this size, so the
+   figure here is plain ink like every other number on the row. */
+/* The pair sits centred in the tile, under the centred date — but each
+   figure stays left-aligned within itself, so its label and number share an
+   edge rather than floating apart. */
+.hero-figures { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-start; justify-content: center; }
+.hero-fig { min-width: 0; text-align: left; }
+.hero-fig .tile-value { margin-top: 3px; }
 
 /* ── stepping back through weigh-ins ─────────────────────────── */
+/* Spans the hero tile it governs, with the date centred between the two
+   buttons — big enough to hit with a thumb. */
 .daynav {
   display: flex; align-items: center; gap: 8px;
-  margin: -4px 0 -6px;
+  margin: 0 0 12px;
 }
 .daynav-btn {
-  width: 30px; height: 30px; flex: none; border-radius: 9px;
+  width: 38px; height: 34px; flex: none; border-radius: 10px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-  font-size: 16px; line-height: 1; cursor: pointer;
+  font-size: 20px; line-height: 1; cursor: pointer;
 }
 .daynav-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
-.daynav-btn:disabled { opacity: .35; cursor: default; }
+.daynav-btn:disabled { opacity: .3; cursor: default; }
 .daynav-label {
-  font-size: 12.5px; font-weight: 600; color: var(--ink-3);
+  flex: 1 1 auto; text-align: center; min-width: 0;
+  font-size: 13px; font-weight: 600; color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* Looking at the past should be unmistakable — every tile is describing a
-   day that isn't today, and nothing else on screen would say so. */
+/* Looking at the past should be unmistakable — every tile in the row is
+   describing a day that isn't today, and nothing else would say so. */
 .daynav.past .daynav-label { color: var(--accent-a); }
 .daynav-today {
   font: inherit; font-size: 12px; color: var(--ink-3);
   background: none; border: none; text-decoration: underline;
-  cursor: pointer; padding: 0 2px;
+  cursor: pointer; padding: 0; margin-top: 3px;
 }
 .daynav-today:hover { color: var(--ink); }
 .down { color: var(--good); }
@@ -441,6 +451,7 @@ code {
 /* ── responsive ─────────────────────────────────────────────── */
 @media (max-width: 860px) {
   .tiles { grid-template-columns: repeat(2, 1fr); }
+  .tile.hero .tile-value { font-size: 30px; }
   .tile.hero { grid-column: 1 / -1; }
   #chart { height: 300px; }
 }

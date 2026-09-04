@@ -27,11 +27,10 @@ const state = {
   selected: null,
 };
 
-/* Defaults for a fresh database; the server stores the blob as-is.
-   Which chart series are drawn lives here too. Toggled from the legend rather than
-   They're toggled from the legend rather than Settings — the control
-   belongs next to the thing it controls, and two places to set one switch
-   is how they end up disagreeing. */
+/* Defaults for a fresh database; the server stores the blob as-is. Which
+   chart series are drawn lives here too. They're toggled from the legend
+   rather than Settings — the control belongs next to the thing it controls,
+   and two places to set one switch is how they end up disagreeing. */
 const SERIES = ["dots", "trend", "fat", "pace", "target"];
 const DEFAULT_PREFS = {
   range: 7, view: "chart", theme: "system", sync_hours: 6,
@@ -194,16 +193,17 @@ function refreshTiles() {
 
 function renderDayNav() {
   const nav = $("#daynav");
-  // One weigh-in is not a sequence; there'd be nothing to step to.
-  nav.hidden = state.entries.length < 2;
+  nav.hidden = state.entries.length === 0;
   if (nav.hidden) return;
   const i = selectedIndex();
   const last = state.entries.length - 1;
   $("#day-prev").disabled = i <= 0;
   $("#day-next").disabled = i >= last;
   $("#day-today").hidden = state.selected == null;
-  $("#day-label").textContent =
-    state.selected == null ? "Latest weigh-in" : fmtDay(state.entries[i].date);
+  // The date always, rather than "latest" — it's the heading for the figures
+  // beneath it, and a heading that sometimes names a day and sometimes
+  // doesn't is a worse heading.
+  $("#day-label").textContent = fmtDay(state.entries[i].date);
   nav.classList.toggle("past", state.selected != null);
 }
 
@@ -215,8 +215,7 @@ function renderTiles() {
     // the previous one left on screen — otherwise these look like live
     // numbers for whoever's now active instead of stale leftovers.
     $("#s-current").textContent = "—";
-    $("#s-current-fat").hidden = true;
-    $("#s-current-label").textContent = "Current";
+    $("#s-current-fat-wrap").hidden = true;
     $("#s-current-sub").textContent = "no data yet";
     $("#s-trend").textContent = "—";
     $("#s-trend-sub").textContent = "smoothed";
@@ -235,16 +234,16 @@ function renderTiles() {
   }
 
   $("#s-current").textContent = lb(s.current);
-  $("#s-current-sub").textContent = s.last ? fmtDay(s.last) : "";
+  // The date is already the heading above these figures, so the sub line
+  // says the one thing that isn't visible: whether this is the newest
+  // reading or somewhere back in the log.
+  $("#s-current-sub").textContent = state.selected == null ? "Latest weigh-in" : "";
   // Body fat belongs beside the weight, not a scroll away: both are the
-  // same morning's reading of the same body.
+  // same morning's reading of the same body, so both are shown the same.
   const sel = state.entries.find((e) => e.date === s.last);
   const fat = sel && typeof sel.fat_ratio === "number" ? sel.fat_ratio : null;
-  const fatEl = $("#s-current-fat");
-  fatEl.hidden = fat == null;
-  if (fat != null) fatEl.textContent = `${fat.toFixed(1)}%`;
-  // Say plainly when the row isn't describing the present.
-  $("#s-current-label").textContent = state.selected == null ? "Current" : "That day";
+  $("#s-current-fat-wrap").hidden = fat == null;
+  if (fat != null) $("#s-current-fat").textContent = `${fat.toFixed(1)}%`;
 
   $("#s-trend").textContent = lb(s.trend_now);
   $("#s-trend-sub").textContent = "7-day average";

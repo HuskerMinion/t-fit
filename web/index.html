@@ -137,25 +137,33 @@
     <p class="form-msg" id="entry-msg" role="status" aria-live="polite"></p>
   </section>
 
-  <!-- ── which day the tiles describe ────────────────────────── -->
-  <!-- Steps weigh-in to weigh-in, not calendar day to calendar day: a date
-       you didn't stand on the scale has nothing to show. Every tile below
-       follows, so the row always means one consistent thing. -->
-  <div class="daynav" id="daynav" hidden>
-    <button type="button" class="daynav-btn" id="day-prev" title="Previous weigh-in (←)" aria-label="Previous weigh-in">‹</button>
-    <span class="daynav-label" id="day-label" role="status" aria-live="polite">—</span>
-    <button type="button" class="daynav-btn" id="day-next" title="Next weigh-in (→)" aria-label="Next weigh-in">›</button>
-    <button type="button" class="daynav-today" id="day-today" hidden>Back to latest</button>
-  </div>
-
   <!-- ── stat tiles ──────────────────────────────────────────── -->
   <section class="tiles" id="tiles" aria-label="Summary">
     <div class="tile hero">
-      <div class="tile-label" id="s-current-label">Current</div>
-      <div class="tile-value">
-        <span id="s-current">—</span><span class="tile-fat" id="s-current-fat" hidden></span>
+      <!-- Which weigh-in every tile in this row describes. It lives inside
+           the hero tile so it spans exactly the block it governs, and steps
+           weigh-in to weigh-in rather than by calendar day — a date you
+           didn't stand on the scale has nothing to show. -->
+      <div class="daynav" id="daynav" hidden>
+        <button type="button" class="daynav-btn" id="day-prev" title="Previous weigh-in (←)" aria-label="Previous weigh-in">‹</button>
+        <span class="daynav-label" id="day-label" role="status" aria-live="polite">—</span>
+        <button type="button" class="daynav-btn" id="day-next" title="Next weigh-in (→)" aria-label="Next weigh-in">›</button>
+      </div>
+      <!-- Weight and body fat are the same morning's reading of the same
+           body, so they're shown as equals: same size, same colour, each
+           named. -->
+      <div class="hero-figures">
+        <div class="hero-fig">
+          <div class="tile-label">Weight <span class="unit">lb</span></div>
+          <div class="tile-value" id="s-current">—</div>
+        </div>
+        <div class="hero-fig" id="s-current-fat-wrap" hidden>
+          <div class="tile-label">Body fat</div>
+          <div class="tile-value" id="s-current-fat">—</div>
+        </div>
       </div>
       <div class="tile-sub" id="s-current-sub">no data yet</div>
+      <button type="button" class="daynav-today" id="day-today" hidden>Back to latest</button>
     </div>
     <div class="tile">
       <div class="tile-label">7-day trend</div>
