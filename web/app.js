@@ -26,7 +26,7 @@ const state = {
 
 /* Defaults for a fresh database. Anything added here is picked up by the
    settings drawer automatically — the server stores the blob as-is. */
-const DEFAULT_PREFS = { range: 7, view: "chart", theme: "system", dots: true, sync_hours: 6 };
+const DEFAULT_PREFS = { range: 7, view: "chart", theme: "system", dots: true, fat: true, sync_hours: 6 };
 
 /* ── theme ───────────────────────────────────────────────────── */
 /* Three states: an explicit light or dark, or "system" meaning follow the
@@ -251,7 +251,15 @@ function draw() {
   const W = svg.clientWidth || 900;
   const H = svg.clientHeight || 340;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  const M = { t: 14, r: 16, b: 26, l: 44 };
+
+  // Body fat, when the scale measured it. Decided before the margins are
+  // fixed, because its axis needs room on the right that the chart
+  // otherwise doesn't reserve. One reading can't make a line, so two is the
+  // threshold — below that there's nothing to draw and no axis to label.
+  const fatRows = rows.filter((p) => typeof p.fat_ratio === "number");
+  const showFat = (!state.prefs || state.prefs.fat !== false) && fatRows.length > 1;
+
+  const M = { t: 14, r: showFat ? 46 : 16, b: 26, l: 44 };
   const iw = W - M.l - M.r, ih = H - M.t - M.b;
 
   const t0 = parseDay(rows[0].date).getTime();
@@ -395,6 +403,37 @@ function draw() {
   svg.appendChild(el("path", { class: "trend-line", d: dSolid }));
   $("#lg-gap").hidden = gaps === 0;
 
+  // Body fat %, on its own axis at the right — a percentage and a weight
+  // share no units, so forcing them onto one scale would make the
+  // relationship between the two lines meaningless. The line is drawn only
+  // between days that actually have a reading, and breaks over a long gap
+  // rather than ruling straight through months nobody measured.
+  let YF = null;
+  if (showFat) {
+    let flo = Math.min(...fatRows.map((p) => p.fat_ratio));
+    let fhi = Math.max(...fatRows.map((p) => p.fat_ratio));
+    const fpad = Math.max((fhi - flo) * 0.15, 0.6);
+    flo -= fpad; fhi += fpad;
+    YF = (v) => M.t + ih - ((v - flo) / (fhi - flo)) * ih;
+
+    for (const v of niceTicks(flo, fhi, 4)) {
+      const y = YF(v);
+      if (y < M.t - 1 || y > M.t + ih + 1) continue;
+      const t = el("text", { class: "axis-text fat-axis", x: W - M.r + 7, y: y + 4 });
+      t.textContent = `${v.toFixed(0)}%`;
+      svg.appendChild(t);
+    }
+
+    let dFat = "", prevISO = null;
+    for (const p of fatRows) {
+      const brk = prevISO === null || daysBetween(prevISO, p.date) > GAP;
+      dFat += (brk ? "M" : "L") + X(p.date).toFixed(1) + " " + YF(p.fat_ratio).toFixed(1) + " ";
+      prevISO = p.date;
+    }
+    svg.appendChild(el("path", { class: "fat-line", d: dFat }));
+  }
+  $("#lg-fat").hidden = !showFat;
+
   // interaction layer
   const cross = el("line", { class: "crosshair", y1: M.t, y2: M.t + ih, opacity: 0 });
   const focus = el("circle", { class: "focus-dot", r: 5, opacity: 0 });
@@ -432,6 +471,7 @@ function hover(evt) {
     `<div class="tt-d">${fmtDay(p.date)}</div>` +
     `<div class="tt-w">${lb(p.weight_lb)} lb</div>` +
     `<div class="tt-t">7-day trend ${lb(p.trend)}</div>` +
+    (typeof p.fat_ratio === "number" ? `<div class="tt-f">${p.fat_ratio.toFixed(1)}% body fat</div>` : "") +
     (p.memo ? `<div class="tt-m">${escapeHtml(p.memo)}</div>` : "");
   tip.hidden = false;
   const wrap = $(".chart-wrap").getBoundingClientRect();
@@ -454,6 +494,10 @@ function renderTable() {
   const shown = rows.slice(0, TABLE_CAP);
   const body = $("#tbl tbody");
   body.innerHTML = "";
+  // The fat column only exists if there's fat to put in it. A basic scale
+  // shouldn't cost you a column of blanks on a phone-width table.
+  const anyFat = rows.some((e) => typeof e.fat_ratio === "number");
+  $("#th-fat").hidden = !anyFat;
   for (let i = 0; i < shown.length; i++) {
     const e = shown[i];
     const prev = shown[i + 1];
@@ -464,6 +508,9 @@ function renderTable() {
       `<td class="day">${fmtDay(e.date)}</td>` +
       `<td class="num">${e.weight_lb.toFixed(1)}</td>` +
       `<td class="num ${deltaClass(delta)}">${delta == null ? "" : signed(delta)}</td>` +
+      (anyFat
+        ? `<td class="num fat">${typeof e.fat_ratio === "number" ? e.fat_ratio.toFixed(1) : ""}</td>`
+        : "") +
       `<td class="memo${memo ? " has" : ""}"${memo ? ' tabindex="0" role="button" title="Show the whole note"' : ""}>` +
         `<span>${escapeHtml(memo)}</span></td>` +
       `<td class="num"><button class="row-del" title="Delete this entry" aria-label="Delete ${e.date}">×</button></td>`;
@@ -776,7 +823,10 @@ async function syncNow() {
     await loadWithings();
     msg("#w-msg",
       `Added ${r.inserted} new day${r.inserted === 1 ? "" : "s"} from ${r.fetched} readings` +
-      (r.skipped_existing ? ` — ${r.skipped_existing} days were already logged` : "") + ".",
+      (r.skipped_existing ? ` — ${r.skipped_existing} days were already logged` : "") +
+      // Worth saying out loud on a backfill: those days weren't skipped
+      // entirely, they gained body composition they didn't have before.
+      (r.enriched ? `, ${r.enriched} of them filled in with body composition` : "") + ".",
       "ok");
   } catch (e) {
     await loadWithings();
@@ -1012,6 +1062,7 @@ function wire() {
   $("#p-view").addEventListener("change", (e) => savePrefs({ view: e.target.value }));
   $("#p-theme").addEventListener("change", (e) => { savePrefs({ theme: e.target.value }); draw(); });
   $("#p-dots").addEventListener("change", (e) => savePrefs({ dots: e.target.checked }));
+  $("#p-fat").addEventListener("change", (e) => { savePrefs({ fat: e.target.checked }); draw(); });
   $("#p-sync").addEventListener("change", (e) => savePrefs({ sync_hours: +e.target.value }));
 
 }
@@ -1127,6 +1178,7 @@ function syncPrefsForm() {
   $("#p-view").value = p.view === "table" ? "table" : "chart";
   $("#p-theme").value = p.theme;
   $("#p-dots").checked = p.dots !== false;
+  $("#p-fat").checked = p.fat !== false;
   $("#p-sync").value = String(p.sync_hours ?? 6);
 }
 

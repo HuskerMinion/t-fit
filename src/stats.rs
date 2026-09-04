@@ -170,12 +170,7 @@ mod tests {
     use crate::model::Source;
 
     fn e(d: &str, w: f64) -> Entry {
-        Entry {
-            date: NaiveDate::parse_from_str(d, "%Y-%m-%d").unwrap(),
-            weight_lb: w,
-            memo: String::new(),
-            source: Source::Manual,
-        }
+        Entry::plain(NaiveDate::parse_from_str(d, "%Y-%m-%d").unwrap(), w, String::new(), Source::Manual)
     }
 
     #[test]
@@ -192,12 +187,7 @@ mod tests {
         let mut v = Vec::new();
         for i in 0..30 {
             let d = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap() + Duration::days(i);
-            v.push(Entry {
-                date: d,
-                weight_lb: 200.0 - i as f64 * 0.2,
-                memo: String::new(),
-                source: Source::Manual,
-            });
+            v.push(Entry::plain(d, 200.0 - i as f64 * 0.2, String::new(), Source::Manual));
         }
         let r = rate_lb_per_week(&v, 30).unwrap();
         assert!((r + 1.4).abs() < 0.05, "rate was {r}");

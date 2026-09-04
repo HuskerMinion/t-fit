@@ -11,6 +11,34 @@ pub struct User {
     pub name: String,
 }
 
+/// What a body-composition scale reports alongside the weight, when it has
+/// one. Every field is optional and independently so: a basic scale sends
+/// none of it, and even a Body Cardio can fail to read one metric while
+/// getting the rest — bare feet, dry skin, standing off-centre.
+///
+/// Deliberately not stored: fat mass and fat-free mass. Both are arithmetic
+/// on `weight_lb` and `fat_ratio`, and a stored copy is a second version of
+/// the same fact waiting to disagree with the first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Composition {
+    /// Body fat as a percentage of total weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fat_ratio: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muscle_lb: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bone_lb: Option<f64>,
+    /// Total body water, in pounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub water_lb: Option<f64>,
+}
+
+impl Composition {
+    pub fn is_empty(&self) -> bool {
+        *self == Composition::default()
+    }
+}
+
 /// One weigh-in. At most one per calendar day — the day *is* the identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
@@ -20,6 +48,18 @@ pub struct Entry {
     pub memo: String,
     #[serde(default = "Source::manual")]
     pub source: Source,
+    /// Flattened, so an entry is one flat object to the front end rather
+    /// than a weight with a nested sidecar.
+    #[serde(flatten, default)]
+    pub body: Composition,
+}
+
+impl Entry {
+    /// A weigh-in with nothing but a weight — what typing a number by hand,
+    /// a CSV row and a FitDay record all produce.
+    pub fn plain(date: NaiveDate, weight_lb: f64, memo: String, source: Source) -> Self {
+        Entry { date, weight_lb, memo, source, body: Composition::default() }
+    }
 }
 
 /// Where a reading came from. Kept so a Withings sync never silently

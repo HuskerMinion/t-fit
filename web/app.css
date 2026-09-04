@@ -320,6 +320,14 @@ button:disabled { opacity: .55; cursor: default; }
 .grid-line { stroke: var(--line-soft); stroke-width: 1; }
 .axis-text { fill: var(--ink-3); font-size: 11px; font-family: var(--font); }
 .trend-line { fill: none; stroke: var(--s1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+/* Body fat rides a second axis on the right. Violet keeps it clear of the
+   blue weight line and the orange goal pace. */
+.fat-line {
+  fill: none; stroke: var(--accent-a); stroke-width: 1.8;
+  stroke-linejoin: round; stroke-linecap: round; opacity: .9;
+}
+.axis-text.fat-axis { fill: var(--accent-a); opacity: .75; }
+.swatch.acc { background: var(--accent-a); }
 .trend-band { fill: var(--s1-soft); }
 .goal-line { stroke: var(--s2); stroke-width: 2; stroke-dasharray: 6 5; fill: none; }
 .goal-label { fill: var(--s2); font-size: 11px; font-weight: 600; font-family: var(--font); }
@@ -359,6 +367,9 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-alig
 tbody tr:hover { background: var(--surface-2); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 td.memo { color: var(--ink-2); }
+/* Body fat sits beside the weight but isn't the headline — same violet as
+   its chart line, so the two read as one thing. */
+td.fat { color: var(--accent-a); }
 .row-del {
   background: none; border: none; color: var(--ink-3); cursor: pointer;
   padding: 0 6px; font-size: 15px; line-height: 1; border-radius: 6px;

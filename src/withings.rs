@@ -14,7 +14,7 @@
 //! client id and secret alongside its own tokens.
 
 use crate::db::Db;
-use crate::model::{Entry, Source};
+use crate::model::{Composition, Entry, Source};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,10 @@ pub struct SyncReport {
     pub fetched: usize,
     pub inserted: usize,
     pub skipped_existing: usize,
+    /// Days that already existed and gained body composition they didn't
+    /// have. Counted separately from `inserted` because it's the number
+    /// that explains a backfill over years of history.
+    pub enriched: usize,
     pub first: Option<String>,
     pub last: Option<String>,
 }
@@ -297,9 +301,74 @@ struct Measure {
     kind: i32,
 }
 
-/// Pull weight measurements from `since` (default: everything) and add any day
-/// we don't already have to this profile's log. Days already in the
-/// database are never touched — a hand-typed weight and its note always win.
+/// Withings measurement types. All of these come back from one `getmeas`
+/// call — `meastypes` takes a comma-separated list — on the `user.metrics`
+/// scope we already hold, so body composition costs no extra request and no
+/// re-authorization.
+mod meas {
+    pub const WEIGHT: i32 = 1;
+    pub const FAT_RATIO: i32 = 6;
+    pub const MUSCLE: i32 = 76;
+    pub const HYDRATION: i32 = 77;
+    pub const BONE: i32 = 88;
+}
+
+const MEASTYPES: &str = "1,6,76,77,88";
+
+/// Turn one measure into a real value: Withings sends an integer plus a
+/// power-of-ten exponent, so 82.5 kg arrives as 82500 with unit -3.
+fn scaled(m: &Measure) -> f64 {
+    m.value * 10f64.powi(m.unit)
+}
+
+/// Everything one weigh-in reported. A group without a plausible weight
+/// isn't a weigh-in at all, so `from_group` gives back `None` for it.
+struct Reading {
+    weight_lb: f64,
+    body: Composition,
+}
+
+fn from_group(g: &Group) -> Option<Reading> {
+    let kg = g.measures.iter().find(|m| m.kind == meas::WEIGHT).map(scaled)?;
+    if !(kg.is_finite() && kg > 2.0 && kg < 700.0) {
+        return None;
+    }
+    let lb = |kind: i32| {
+        g.measures
+            .iter()
+            .find(|m| m.kind == kind)
+            .map(|m| round1(scaled(m) * KG_TO_LB))
+            .filter(|v| v.is_finite() && *v > 0.0)
+    };
+    let pct = g
+        .measures
+        .iter()
+        .find(|m| m.kind == meas::FAT_RATIO)
+        .map(scaled)
+        .filter(|v| v.is_finite() && (1.0..=80.0).contains(v))
+        .map(round1);
+    Some(Reading {
+        weight_lb: round1(kg * KG_TO_LB),
+        body: Composition {
+            fat_ratio: pct,
+            muscle_lb: lb(meas::MUSCLE),
+            bone_lb: lb(meas::BONE),
+            water_lb: lb(meas::HYDRATION),
+        },
+    })
+}
+
+fn round1(v: f64) -> f64 {
+    (v * 10.0).round() / 10.0
+}
+
+/// Pull measurements from `since` (default: everything) and add any day we
+/// don't already have to this profile's log.
+///
+/// A day already in the database never has its weight, note or source
+/// touched — hand-typed always wins. It can still *gain* body composition it
+/// was missing, because that's adding a fact rather than overwriting one;
+/// see `Db::fill_composition`.
 pub async fn sync(db: &Db, uid: i64, since: Option<NaiveDate>) -> Result<SyncReport> {
     let token = access_token(db, uid).await?;
     let start = since
@@ -314,8 +383,8 @@ pub async fn sync(db: &Db, uid: i64, since: Option<NaiveDate>) -> Result<SyncRep
         .bearer_auth(&token)
         .form(&[
             ("action", "getmeas"),
-            ("meastype", "1"), // 1 = weight
-            ("category", "1"), // 1 = real measurements, not goals
+            ("meastypes", MEASTYPES), // weight plus body composition
+            ("category", "1"),        // 1 = real measurements, not goals
             ("startdate", &start),
             ("enddate", &end),
         ])
@@ -328,41 +397,44 @@ pub async fn sync(db: &Db, uid: i64, since: Option<NaiveDate>) -> Result<SyncRep
 
     // Several readings can land on one day; keep the earliest — the morning
     // weigh-in, which is the one that's actually comparable day to day.
-    let mut per_day: std::collections::BTreeMap<NaiveDate, (i64, f64)> = Default::default();
+    // Composition comes from that same group rather than being merged across
+    // the day's readings, so the numbers on a row all describe one moment on
+    // the scale instead of an average of several.
+    let mut per_day: std::collections::BTreeMap<NaiveDate, (i64, Reading)> = Default::default();
     let mut fetched = 0usize;
     for g in &body.measuregrps {
-        let Some(m) = g.measures.iter().find(|m| m.kind == 1) else { continue };
-        let kg = m.value * 10f64.powi(m.unit);
-        if !(kg.is_finite() && kg > 2.0 && kg < 700.0) {
-            continue;
-        }
+        let Some(reading) = from_group(g) else { continue };
         let Some(dt) = DateTime::from_timestamp(g.date, 0) else { continue };
-        let local = dt.with_timezone(&chrono::Local);
-        let day = local.date_naive();
+        let day = dt.with_timezone(&chrono::Local).date_naive();
         fetched += 1;
-        per_day
-            .entry(day)
-            .and_modify(|slot| {
-                if g.date < slot.0 {
-                    *slot = (g.date, kg * KG_TO_LB);
-                }
-            })
-            .or_insert((g.date, kg * KG_TO_LB));
+        match per_day.get(&day) {
+            Some((at, _)) if *at <= g.date => {}
+            _ => {
+                per_day.insert(day, (g.date, reading));
+            }
+        }
     }
 
     let mut inserted = 0usize;
     let mut skipped = 0usize;
-    for (day, (_, lb)) in &per_day {
+    let mut enriched = 0usize;
+    for (day, (_, reading)) in &per_day {
         let e = Entry {
             date: *day,
-            weight_lb: (lb * 10.0).round() / 10.0,
+            weight_lb: reading.weight_lb,
             memo: String::new(),
             source: Source::Withings,
+            body: reading.body,
         };
         if db.insert_if_absent(uid, &e)? {
             inserted += 1;
         } else {
             skipped += 1;
+            // The day was already there. Its weight and note stay exactly as
+            // they are; only composition it was missing gets filled in.
+            if db.fill_composition(uid, *day, &reading.body)? {
+                enriched += 1;
+            }
         }
     }
 
@@ -372,6 +444,7 @@ pub async fn sync(db: &Db, uid: i64, since: Option<NaiveDate>) -> Result<SyncRep
         fetched,
         inserted,
         skipped_existing: skipped,
+        enriched,
         first: per_day.keys().next().map(|d| d.to_string()),
         last: per_day.keys().next_back().map(|d| d.to_string()),
     })
@@ -455,6 +528,72 @@ mod tests {
         let s = status(&db, b).unwrap();
         assert!(!s.configured && !s.has_secret && s.client_id.is_none());
         assert!(creds(&db, b).is_err());
+    }
+
+    /// One weigh-in arrives as a group of measures sharing a timestamp.
+    /// Everything is an integer plus a power-of-ten exponent, and each metric
+    /// can be missing on its own.
+    #[test]
+    fn a_measure_group_yields_weight_and_whatever_else_was_measured() {
+        let g = Group {
+            date: 1_700_000_000,
+            measures: vec![
+                Measure { value: 82500.0, unit: -3, kind: 1 },   // 82.5 kg
+                Measure { value: 283.0, unit: -1, kind: 6 },     // 28.3 %
+                Measure { value: 58200.0, unit: -3, kind: 76 },  // 58.2 kg muscle
+                Measure { value: 3100.0, unit: -3, kind: 88 },   // 3.1 kg bone
+            ],
+        };
+        let r = from_group(&g).expect("a group with a weight is a weigh-in");
+        assert!((r.weight_lb - 181.9).abs() < 0.05, "{}", r.weight_lb);
+        assert_eq!(r.body.fat_ratio, Some(28.3));
+        assert!((r.body.muscle_lb.unwrap() - 128.3).abs() < 0.1, "{:?}", r.body.muscle_lb);
+        assert!((r.body.bone_lb.unwrap() - 6.8).abs() < 0.1, "{:?}", r.body.bone_lb);
+        assert_eq!(r.body.water_lb, None, "hydration wasn't measured, so it stays absent");
+    }
+
+    /// A basic scale sends a weight and nothing else — that must still be a
+    /// perfectly good weigh-in, not a group we throw away.
+    #[test]
+    fn a_weight_with_no_composition_is_still_a_reading() {
+        let g = Group {
+            date: 1_700_000_000,
+            measures: vec![Measure { value: 90000.0, unit: -3, kind: 1 }],
+        };
+        let r = from_group(&g).unwrap();
+        assert!(r.body.is_empty());
+        assert!((r.weight_lb - 198.4).abs() < 0.05, "{}", r.weight_lb);
+    }
+
+    /// Composition without a weight isn't a weigh-in, and a nonsense weight
+    /// is not one either.
+    #[test]
+    fn groups_without_a_plausible_weight_are_ignored() {
+        let no_weight = Group {
+            date: 1,
+            measures: vec![Measure { value: 283.0, unit: -1, kind: 6 }],
+        };
+        assert!(from_group(&no_weight).is_none());
+
+        let absurd = Group {
+            date: 1,
+            measures: vec![Measure { value: 900000.0, unit: -3, kind: 1 }], // 900 kg
+        };
+        assert!(from_group(&absurd).is_none());
+    }
+
+    /// A fat ratio outside anything a human body reports is a bad read, and
+    /// a bad read is worse than no read — it would draw a cliff on the chart.
+    #[test]
+    fn an_impossible_fat_ratio_is_dropped_not_stored() {
+        let g = Group {
+            date: 1,
+            measures: vec![
+                Measure { value: 82500.0, unit: -3, kind: 1 },
+                Measure { value: 0.0, unit: 0, kind: 6 },
+            ],
+        };
+        assert_eq!(from_group(&g).unwrap().body.fat_ratio, None);
     }
 
     #[test]

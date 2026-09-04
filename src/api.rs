@@ -147,12 +147,10 @@ pub struct EntryIn {
 }
 
 async fn put_entry(State(a): State<App>, Json(b): Json<EntryIn>) -> ApiResult<Json<Entry>> {
-    let e = Entry {
-        date: b.date,
-        weight_lb: b.weight_lb,
-        memo: b.memo,
-        source: Source::Manual,
-    };
+    // Typing a weight by hand says nothing about body composition, and
+    // `upsert` leaves those columns alone — so editing a day never discards
+    // what the scale measured that morning.
+    let e = Entry::plain(b.date, b.weight_lb, b.memo, Source::Manual);
     a.db.upsert(a.db.active_user_id()?, &e)?;
     Ok(Json(e))
 }
@@ -184,6 +182,11 @@ pub struct SeriesPoint {
     pub w: f64,
     pub t: Option<f64>,
     pub m: bool,
+    /// Body fat %, when the scale measured it that day. Omitted rather than
+    /// zeroed, so the chart can break the line instead of drawing a plunge
+    /// to nothing on a day the reading failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f: Option<f64>,
 }
 
 async fn get_series(
@@ -205,6 +208,7 @@ async fn get_series(
                 w: e.weight_lb,
                 t: ma.get(&e.date).copied(),
                 m: !e.memo.is_empty(),
+                f: e.body.fat_ratio,
             })
             .collect(),
     ))
@@ -315,13 +319,23 @@ async fn post_import(
 
 async fn export_csv(State(a): State<App>) -> ApiResult<Response> {
     let mut w = csv::Writer::from_writer(vec![]);
-    w.write_record(["date", "weight_lb", "memo", "source"])?;
+    // Body composition rides along so the export is still the whole log.
+    // Blank rather than 0 where a scale didn't measure something — zero is
+    // a reading, absence isn't.
+    w.write_record([
+        "date", "weight_lb", "memo", "source", "fat_ratio", "muscle_lb", "bone_lb", "water_lb",
+    ])?;
+    let num = |v: Option<f64>| v.map(|x| format!("{x:.1}")).unwrap_or_default();
     for e in a.db.entries(a.db.active_user_id()?)? {
         w.write_record([
             e.date.format("%Y-%m-%d").to_string(),
             format!("{:.2}", e.weight_lb),
             e.memo,
             e.source.as_str().to_string(),
+            num(e.body.fat_ratio),
+            num(e.body.muscle_lb),
+            num(e.body.bone_lb),
+            num(e.body.water_lb),
         ])?;
     }
     let body = String::from_utf8(w.into_inner()?)?;
@@ -493,7 +507,23 @@ async fn w_clear_error(State(a): State<App>) -> ApiResult<Json<serde_json::Value
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-async fn static_handler(uri: Uri) -> Response {
+/// How long a browser may keep an asset without asking again.
+///
+/// Only the icons get a real lifetime, and only because their filenames
+/// carry a version — change the mark, change the name, and nothing stale is
+/// reachable. Everything else revalidates on every load: `index.html` and
+/// the manifest because a stale one strands the app on old code or an old
+/// icon set, and the CSS and JS because they're served under fixed names.
+/// Revalidation is cheap here — see the ETag below.
+fn cache_control(path: &str) -> &'static str {
+    if path.contains("-v") && path.ends_with(".png") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+async fn static_handler(headers: header::HeaderMap, uri: Uri) -> Response {
     let mut p = uri.path().trim_start_matches('/').to_string();
     if p.is_empty() {
         p = "index.html".into();
@@ -507,8 +537,40 @@ async fn static_handler(uri: Uri) -> Response {
             } else {
                 mime_guess::from_path(&p).first_or_octet_stream().to_string()
             };
-            ([(header::CONTENT_TYPE, mime)], f.data).into_response()
+            // The assets are compiled in, so their hash is known without
+            // touching a disk. That turns "revalidate every load" into a
+            // 304 with no body rather than resending the whole file.
+            let etag = format!("\"{}\"", hex16(&f.metadata.sha256_hash()));
+            if headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.split(',').any(|c| c.trim() == etag))
+            {
+                return (
+                    StatusCode::NOT_MODIFIED,
+                    [
+                        (header::ETAG, etag),
+                        (header::CACHE_CONTROL, cache_control(&p).to_string()),
+                    ],
+                )
+                    .into_response();
+            }
+            (
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::ETAG, etag),
+                    (header::CACHE_CONTROL, cache_control(&p).to_string()),
+                ],
+                f.data,
+            )
+                .into_response()
         }
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
+}
+
+/// First 16 bytes of a hash, hex encoded — plenty to tell two builds of one
+/// file apart, and short enough to read in a header.
+fn hex16(bytes: &[u8]) -> String {
+    bytes[..16].iter().map(|b| format!("{b:02x}")).collect()
 }

@@ -56,6 +56,12 @@ pub fn import_csv(
     let di = find(&headers, &["date", "day"]).ok_or_else(|| anyhow!("no date column"))?;
     let wi = find(&headers, &["weight"]).ok_or_else(|| anyhow!("no weight column"))?;
     let mi = find(&headers, &["memo", "note", "comment"]);
+    // Optional, so our own export round-trips without losing what the scale
+    // measured. A Withings weight.csv has none of these and is unaffected.
+    let fi = find(&headers, &["fat_ratio", "fat ratio", "fat%", "fat percent"]);
+    let musi = find(&headers, &["muscle_lb", "muscle mass", "muscle"]);
+    let boni = find(&headers, &["bone_lb", "bone mass", "bone"]);
+    let wati = find(&headers, &["water_lb", "hydration", "water"]);
 
     let mut rep = ImportReport::default();
     // day -> (raw order index, entry) so we can keep the first of a day
@@ -87,12 +93,21 @@ pub fn import_csv(
             .unwrap_or("")
             .trim()
             .to_string();
-        best.entry(date).or_insert(Entry {
-            date,
-            weight_lb: w,
-            memo,
-            source,
-        });
+        let opt = |i: Option<usize>| {
+            i.and_then(|i| rec.get(i))
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0)
+        };
+        let mut e = Entry::plain(date, w, memo, source);
+        e.body = crate::model::Composition {
+            fat_ratio: opt(fi).filter(|v| (1.0..=80.0).contains(v)),
+            muscle_lb: opt(musi),
+            bone_lb: opt(boni),
+            water_lb: opt(wati),
+        };
+        best.entry(date).or_insert(e);
     }
 
     for e in best.values() {

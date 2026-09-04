@@ -1,6 +1,6 @@
 //! SQLite storage. One file, no server, trivially backed up by copying it.
 
-use crate::model::{Entry, Goal, Source, User};
+use crate::model::{Composition, Entry, Goal, Source, User};
 use anyhow::{anyhow, bail, Result};
 use chrono::NaiveDate;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -93,6 +93,10 @@ impl Db {
             weight_lb  REAL NOT NULL,
             memo       TEXT NOT NULL DEFAULT '',
             source     TEXT NOT NULL DEFAULT 'manual',
+            fat_ratio  REAL,
+            muscle_lb  REAL,
+            bone_lb    REAL,
+            water_lb   REAL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (user_id, day)
         "#;
@@ -108,6 +112,16 @@ impl Db {
                 [],
             )?;
             c.execute_batch("DROP TABLE weight; ALTER TABLE weight_new RENAME TO weight;")?;
+        }
+
+        // Body composition arrived after the multi-user rebuild, so a table
+        // that already has `user_id` still needs these. Nullable and added
+        // in place: an existing weight is untouched, and a day simply has
+        // no composition until a scale that measures it says otherwise.
+        for col in ["fat_ratio", "muscle_lb", "bone_lb", "water_lb"] {
+            if !table_has_column(&c, "weight", col)? {
+                c.execute(&format!("ALTER TABLE weight ADD COLUMN {col} REAL"), [])?;
+            }
         }
 
         // `goals.id` is already its own standalone primary key, so a plain
@@ -336,7 +350,8 @@ impl Db {
     pub fn entries(&self, user_id: i64) -> Result<Vec<Entry>> {
         let c = self.0.lock().unwrap();
         let mut st = c.prepare(
-            "SELECT day, weight_lb, memo, source FROM weight WHERE user_id = ?1 ORDER BY day ASC",
+            "SELECT day, weight_lb, memo, source, fat_ratio, muscle_lb, bone_lb, water_lb
+             FROM weight WHERE user_id = ?1 ORDER BY day ASC",
         )?;
         let rows = st
             .query_map(params![user_id], |r| {
@@ -347,6 +362,12 @@ impl Db {
                     weight_lb: r.get(1)?,
                     memo: r.get(2)?,
                     source: Source::parse(&r.get::<_, String>(3)?),
+                    body: Composition {
+                        fat_ratio: r.get(4)?,
+                        muscle_lb: r.get(5)?,
+                        bone_lb: r.get(6)?,
+                        water_lb: r.get(7)?,
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -354,24 +375,43 @@ impl Db {
     }
 
     /// Insert or update one day. Returns true if this changed anything.
+    ///
+    /// Composition follows the same rule the memo already did: a value that
+    /// arrives replaces what's stored, but *absence* never erases anything.
+    /// Typing a weight by hand sends no composition and so keeps whatever
+    /// the scale measured that morning; re-importing an export that carries
+    /// composition writes it through.
     pub fn upsert(&self, user_id: i64, e: &Entry) -> Result<bool> {
         let c = self.0.lock().unwrap();
         let n = c.execute(
-            "INSERT INTO weight (user_id, day, weight_lb, memo, source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+            "INSERT INTO weight
+                (user_id, day, weight_lb, memo, source, fat_ratio, muscle_lb, bone_lb, water_lb, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))
              ON CONFLICT(user_id, day) DO UPDATE SET
                 weight_lb = excluded.weight_lb,
                 memo      = CASE WHEN excluded.memo <> '' THEN excluded.memo ELSE weight.memo END,
                 source    = excluded.source,
+                fat_ratio = COALESCE(excluded.fat_ratio, weight.fat_ratio),
+                muscle_lb = COALESCE(excluded.muscle_lb, weight.muscle_lb),
+                bone_lb   = COALESCE(excluded.bone_lb,   weight.bone_lb),
+                water_lb  = COALESCE(excluded.water_lb,  weight.water_lb),
                 updated_at= datetime('now')
              WHERE weight.weight_lb <> excluded.weight_lb
-                OR (excluded.memo <> '' AND weight.memo <> excluded.memo)",
+                OR (excluded.memo <> '' AND weight.memo <> excluded.memo)
+                OR (excluded.fat_ratio IS NOT NULL AND weight.fat_ratio IS NOT excluded.fat_ratio)
+                OR (excluded.muscle_lb IS NOT NULL AND weight.muscle_lb IS NOT excluded.muscle_lb)
+                OR (excluded.bone_lb   IS NOT NULL AND weight.bone_lb   IS NOT excluded.bone_lb)
+                OR (excluded.water_lb  IS NOT NULL AND weight.water_lb  IS NOT excluded.water_lb)",
             params![
                 user_id,
                 e.date.format("%Y-%m-%d").to_string(),
                 e.weight_lb,
                 e.memo,
-                e.source.as_str()
+                e.source.as_str(),
+                e.body.fat_ratio,
+                e.body.muscle_lb,
+                e.body.bone_lb,
+                e.body.water_lb,
             ],
         )?;
         Ok(n > 0)
@@ -382,14 +422,58 @@ impl Db {
     pub fn insert_if_absent(&self, user_id: i64, e: &Entry) -> Result<bool> {
         let c = self.0.lock().unwrap();
         let n = c.execute(
-            "INSERT OR IGNORE INTO weight (user_id, day, weight_lb, memo, source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+            "INSERT OR IGNORE INTO weight
+                (user_id, day, weight_lb, memo, source, fat_ratio, muscle_lb, bone_lb, water_lb, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
             params![
                 user_id,
                 e.date.format("%Y-%m-%d").to_string(),
                 e.weight_lb,
                 e.memo,
-                e.source.as_str()
+                e.source.as_str(),
+                e.body.fat_ratio,
+                e.body.muscle_lb,
+                e.body.bone_lb,
+                e.body.water_lb,
+            ],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Add composition to a day that already exists, without touching the
+    /// weight, the memo or the source.
+    ///
+    /// Only fills fields that are currently null. That's what makes it safe
+    /// to run over years of history: a day that already has a fat ratio
+    /// keeps the one it has, so re-syncing is idempotent, and a weight typed
+    /// by hand stays typed by hand while still gaining the scale's extra
+    /// numbers if the scale recorded them that morning.
+    ///
+    /// Returns true if anything was actually filled in.
+    pub fn fill_composition(&self, user_id: i64, day: NaiveDate, b: &Composition) -> Result<bool> {
+        if b.is_empty() {
+            return Ok(false);
+        }
+        let c = self.0.lock().unwrap();
+        let n = c.execute(
+            "UPDATE weight SET
+                fat_ratio = COALESCE(fat_ratio, ?3),
+                muscle_lb = COALESCE(muscle_lb, ?4),
+                bone_lb   = COALESCE(bone_lb,   ?5),
+                water_lb  = COALESCE(water_lb,  ?6),
+                updated_at = datetime('now')
+             WHERE user_id = ?1 AND day = ?2
+               AND (  (fat_ratio IS NULL AND ?3 IS NOT NULL)
+                   OR (muscle_lb IS NULL AND ?4 IS NOT NULL)
+                   OR (bone_lb   IS NULL AND ?5 IS NOT NULL)
+                   OR (water_lb  IS NULL AND ?6 IS NOT NULL))",
+            params![
+                user_id,
+                day.format("%Y-%m-%d").to_string(),
+                b.fat_ratio,
+                b.muscle_lb,
+                b.bone_lb,
+                b.water_lb,
             ],
         )?;
         Ok(n > 0)
@@ -679,6 +763,66 @@ mod tests {
         assert_eq!(db.entries(u).unwrap().len(), 2);
     }
 
+    /// Backfilling years of history is only safe if it can't touch what's
+    /// already there. Fill the gaps, leave everything else exactly alone.
+    #[test]
+    fn filling_composition_never_disturbs_a_day_that_already_has_data() {
+        let db = Db::open_in_memory().unwrap();
+        let u = def_user(&db);
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let day = d("2026-03-01");
+
+        let mut typed = Entry::plain(day, 201.4, "felt heavy".into(), Source::Manual);
+        typed.body.fat_ratio = Some(24.0);
+        db.upsert(u, &typed).unwrap();
+
+        // A sync arrives with a different fat ratio and some metrics the day
+        // is missing. The existing ratio must win; the gaps must fill.
+        let incoming = Composition {
+            fat_ratio: Some(31.9),
+            muscle_lb: Some(140.2),
+            bone_lb: Some(7.5),
+            water_lb: None,
+        };
+        assert!(db.fill_composition(u, day, &incoming).unwrap());
+
+        let e = &db.entries(u).unwrap()[0];
+        assert_eq!(e.weight_lb, 201.4, "the weight is untouched");
+        assert_eq!(e.memo, "felt heavy", "the note is untouched");
+        assert_eq!(e.source, Source::Manual, "still hand-typed");
+        assert_eq!(e.body.fat_ratio, Some(24.0), "an existing value is never replaced");
+        assert_eq!(e.body.muscle_lb, Some(140.2), "a missing one is filled");
+        assert_eq!(e.body.bone_lb, Some(7.5));
+        assert_eq!(e.body.water_lb, None, "nothing invented where there was no reading");
+
+        // Idempotent: running the same sync again changes nothing.
+        assert!(!db.fill_composition(u, day, &incoming).unwrap());
+        // And an empty payload is never a write.
+        assert!(!db.fill_composition(u, day, &Composition::default()).unwrap());
+    }
+
+    /// Editing a weight by hand must not throw away what the scale measured
+    /// — `upsert` writes the columns it owns and no others.
+    #[test]
+    fn correcting_a_weight_keeps_the_body_composition() {
+        let db = Db::open_in_memory().unwrap();
+        let u = def_user(&db);
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let day = d("2026-03-02");
+
+        let mut synced = Entry::plain(day, 200.0, String::new(), Source::Withings);
+        synced.body.fat_ratio = Some(28.3);
+        db.insert_if_absent(u, &synced).unwrap();
+
+        db.upsert(u, &Entry::plain(day, 199.0, "corrected".into(), Source::Manual))
+            .unwrap();
+
+        let e = &db.entries(u).unwrap()[0];
+        assert_eq!(e.weight_lb, 199.0);
+        assert_eq!(e.memo, "corrected");
+        assert_eq!(e.body.fat_ratio, Some(28.3), "the scale's reading survives the edit");
+    }
+
     #[test]
     fn a_new_goal_becomes_current_and_the_old_one_becomes_history() {
         let db = Db::open_in_memory().unwrap();
@@ -718,8 +862,8 @@ mod tests {
         let b = db.create_user("Partner").unwrap().id;
         let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
 
-        db.upsert(a, &Entry { date: d("2026-01-01"), weight_lb: 200.0, memo: String::new(), source: Source::Manual }).unwrap();
-        db.upsert(b, &Entry { date: d("2026-01-01"), weight_lb: 140.0, memo: String::new(), source: Source::Manual }).unwrap();
+        db.upsert(a, &Entry::plain(d("2026-01-01"), 200.0, String::new(), Source::Manual)).unwrap();
+        db.upsert(b, &Entry::plain(d("2026-01-01"), 140.0, String::new(), Source::Manual)).unwrap();
         db.add_goal(a, 180.0, None, 200.0, d("2026-01-01")).unwrap();
 
         assert_eq!(db.entries(a).unwrap().len(), 1);
@@ -743,7 +887,7 @@ mod tests {
         let a = def_user(&db);
         let b = db.create_user("Partner").unwrap().id;
         let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
-        db.upsert(b, &Entry { date: d("2026-01-01"), weight_lb: 140.0, memo: String::new(), source: Source::Manual }).unwrap();
+        db.upsert(b, &Entry::plain(d("2026-01-01"), 140.0, String::new(), Source::Manual)).unwrap();
         db.set_user_setting(b, "withings.access_token", "tok").unwrap();
         db.set_active_user(b).unwrap();
 

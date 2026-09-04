@@ -7,7 +7,11 @@
 <title>t-fit</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237c5cff'/%3E%3Cstop offset='100%25' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='13' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M24 20v11c0 4.5 2 6.5 6 8' stroke-width='5.5'/%3E%3Cpath d='M12 19.5h24' stroke-width='5.5'/%3E%3Cpath d='M8 13v13M40 13v13' stroke-width='4.5'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- Icon filenames carry a version. Android bakes the icon into a generated
+     APK at install time and only notices a new one when the *manifest*
+     changes — same URLs, no update, however different the bytes are. Bump
+     the suffix here and in manifest.webmanifest whenever the mark changes. -->
+<link rel="apple-touch-icon" href="/apple-touch-icon-v2.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="t-fit">
@@ -192,6 +196,7 @@
         <span class="lg" id="lg-gap" hidden><i class="swatch s1 line dash"></i>No weigh-ins</span>
         <span class="lg" id="lg-pace" hidden><i class="swatch s2 line solid"></i>Goal pace</span>
         <span class="lg" id="lg-goal" hidden><i class="swatch s2 line"></i>Target</span>
+        <span class="lg" id="lg-fat" hidden><i class="swatch acc line"></i>Body fat %</span>
         <span class="lg"><i class="swatch note"></i>Has a note</span>
       </div>
       <div class="chart-wrap">
@@ -204,7 +209,7 @@
     <div id="view-table" hidden>
       <div class="table-wrap">
         <table id="tbl">
-          <thead><tr><th>Date</th><th class="num">Weight</th><th class="num">Δ</th><th>Note</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th class="num">Weight</th><th class="num">Δ</th><th class="num" id="th-fat" hidden>Fat %</th><th>Note</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -283,6 +288,12 @@
           <option value="chart">Chart</option>
           <option value="table">Table</option>
         </select>
+      </label>
+
+      <label class="pref" for="p-fat">
+        <span class="pref-label">Show body fat %
+          <small>A second line, on its own axis — only when a scale has measured it</small></span>
+        <input type="checkbox" id="p-fat">
       </label>
 
       <label class="pref" for="p-dots">

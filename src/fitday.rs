@@ -235,12 +235,9 @@ pub fn parse(bytes: &[u8]) -> Result<FitdayReport> {
             report.unresolved += 1;
             continue;
         };
-        by_date.entry(e.date).or_insert_with(|| Entry {
-            date: e.date,
-            weight_lb: rec.weight_lb,
-            memo: rec.note.clone(),
-            source: Source::Fitday,
-        });
+        by_date
+            .entry(e.date)
+            .or_insert_with(|| Entry::plain(e.date, rec.weight_lb, rec.note.clone(), Source::Fitday));
     }
 
     report.with_notes = by_date.values().filter(|e| !e.memo.is_empty()).count();
