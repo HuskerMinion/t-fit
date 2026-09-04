@@ -22,11 +22,27 @@ const state = {
   series: [],       // what's currently plotted
   prefs: null,
   users: [],        // every profile, with .active marking the current one
+  // Which weigh-in the tiles describe. null means the most recent one; any
+  // other value is an ISO date the user stepped back to.
+  selected: null,
 };
 
-/* Defaults for a fresh database. Anything added here is picked up by the
-   settings drawer automatically — the server stores the blob as-is. */
-const DEFAULT_PREFS = { range: 7, view: "chart", theme: "system", dots: true, fat: true, sync_hours: 6 };
+/* Defaults for a fresh database; the server stores the blob as-is.
+   Which chart series are drawn lives here too. Toggled from the legend rather than
+   They're toggled from the legend rather than Settings — the control
+   belongs next to the thing it controls, and two places to set one switch
+   is how they end up disagreeing. */
+const SERIES = ["dots", "trend", "fat", "pace", "target"];
+const DEFAULT_PREFS = {
+  range: 7, view: "chart", theme: "system", sync_hours: 6,
+  dots: true, trend: true, fat: true, pace: true, target: true,
+};
+
+/** Is this series switched on? Unset means on — a new series shouldn't
+ *  arrive invisible for anyone with prefs already saved. */
+function seriesOn(name) {
+  return !state.prefs || state.prefs[name] !== false;
+}
 
 /* ── theme ───────────────────────────────────────────────────── */
 /* Three states: an explicit light or dark, or "system" meaning follow the
@@ -86,6 +102,10 @@ async function load() {
   state.stats = stats;
   state.goal = stats.goal;
   state.goalHistory = goals;
+  // Adding, deleting or switching profile puts the row back on the present;
+  // leaving it pointed at a day that may no longer exist would be worse.
+  state.selected = null;
+  renderDayNav();
   renderTiles();
   renderGoalForm();
   renderGoalHistory();
@@ -123,6 +143,70 @@ function applyRange() {
   draw();
 }
 
+/* ── which weigh-in the tiles describe ───────────────────────── */
+/**
+ * `state.selected` is an ISO date, or null meaning "the latest". Stepping
+ * moves through *entries* rather than calendar days: a date with no weigh-in
+ * has nothing to show, and stepping onto one would be a dead press.
+ */
+function selectedIndex() {
+  if (!state.entries.length) return -1;
+  if (state.selected == null) return state.entries.length - 1;
+  const i = state.entries.findIndex((e) => e.date === state.selected);
+  return i === -1 ? state.entries.length - 1 : i;
+}
+
+function stepDay(delta) {
+  const i = selectedIndex();
+  if (i < 0) return;
+  const next = i + delta;
+  if (next < 0 || next >= state.entries.length) return;
+  selectDay(next === state.entries.length - 1 ? null : state.entries[next].date);
+}
+
+/** Point the tiles at one day (null = the latest) and refresh them. */
+function selectDay(iso) {
+  state.selected = iso;
+  renderDayNav();
+  refreshTiles();
+}
+
+let tileTimer = null;
+/**
+ * Fetch the tile figures for the selected day.
+ *
+ * The server recomputes them from the entries up to that date, which is the
+ * whole point: "what this said that morning" comes out of the same code
+ * that produces today's, rather than a second implementation here that
+ * would eventually drift. Debounced, because holding an arrow key down
+ * would otherwise fire a request per repeat.
+ */
+function refreshTiles() {
+  clearTimeout(tileTimer);
+  const iso = state.selected;
+  tileTimer = setTimeout(async () => {
+    try {
+      state.stats = await api("/api/stats" + (iso ? `?as_of=${iso}` : ""));
+    } catch { /* keep the last good figures rather than blanking the row */ }
+    renderTiles();
+  }, iso ? 120 : 0);
+}
+
+function renderDayNav() {
+  const nav = $("#daynav");
+  // One weigh-in is not a sequence; there'd be nothing to step to.
+  nav.hidden = state.entries.length < 2;
+  if (nav.hidden) return;
+  const i = selectedIndex();
+  const last = state.entries.length - 1;
+  $("#day-prev").disabled = i <= 0;
+  $("#day-next").disabled = i >= last;
+  $("#day-today").hidden = state.selected == null;
+  $("#day-label").textContent =
+    state.selected == null ? "Latest weigh-in" : fmtDay(state.entries[i].date);
+  nav.classList.toggle("past", state.selected != null);
+}
+
 /* ── tiles ───────────────────────────────────────────────────── */
 function renderTiles() {
   const s = state.stats;
@@ -131,6 +215,8 @@ function renderTiles() {
     // the previous one left on screen — otherwise these look like live
     // numbers for whoever's now active instead of stale leftovers.
     $("#s-current").textContent = "—";
+    $("#s-current-fat").hidden = true;
+    $("#s-current-label").textContent = "Current";
     $("#s-current-sub").textContent = "no data yet";
     $("#s-trend").textContent = "—";
     $("#s-trend-sub").textContent = "smoothed";
@@ -150,6 +236,15 @@ function renderTiles() {
 
   $("#s-current").textContent = lb(s.current);
   $("#s-current-sub").textContent = s.last ? fmtDay(s.last) : "";
+  // Body fat belongs beside the weight, not a scroll away: both are the
+  // same morning's reading of the same body.
+  const sel = state.entries.find((e) => e.date === s.last);
+  const fat = sel && typeof sel.fat_ratio === "number" ? sel.fat_ratio : null;
+  const fatEl = $("#s-current-fat");
+  fatEl.hidden = fat == null;
+  if (fat != null) fatEl.textContent = `${fat.toFixed(1)}%`;
+  // Say plainly when the row isn't describing the present.
+  $("#s-current-label").textContent = state.selected == null ? "Current" : "That day";
 
   $("#s-trend").textContent = lb(s.trend_now);
   $("#s-trend-sub").textContent = "7-day average";
@@ -257,7 +352,8 @@ function draw() {
   // otherwise doesn't reserve. One reading can't make a line, so two is the
   // threshold — below that there's nothing to draw and no axis to label.
   const fatRows = rows.filter((p) => typeof p.fat_ratio === "number");
-  const showFat = (!state.prefs || state.prefs.fat !== false) && fatRows.length > 1;
+  const canFat = fatRows.length > 1;
+  const showFat = canFat && seriesOn("fat");
 
   const M = { t: 14, r: showFat ? 46 : 16, b: 26, l: 44 };
   const iw = W - M.l - M.r, ih = H - M.t - M.b;
@@ -267,15 +363,22 @@ function draw() {
   const tSpan = t1 - t0 || 1;
   const X = (iso) => M.l + ((parseDay(iso).getTime() - t0) / tSpan) * iw;
 
-  const goalW = state.goal && state.goal.target_lb;
+  // A hidden series shouldn't stretch the axis either: switching the target
+  // off and having the weight line stay squashed against the top would make
+  // the toggle feel broken.
+  const goalW = (state.goal && state.goal.target_lb) ?? null;
+  const canTarget = goalW != null;
+  const showTarget = canTarget && seriesOn("target");
   let lo = Math.min(...rows.map((r) => r.weight_lb));
   let hi = Math.max(...rows.map((r) => r.weight_lb));
-  if (goalW != null && goalW >= lo - 40 && goalW <= hi + 40) { lo = Math.min(lo, goalW); hi = Math.max(hi, goalW); }
+  if (showTarget && goalW >= lo - 40 && goalW <= hi + 40) { lo = Math.min(lo, goalW); hi = Math.max(hi, goalW); }
 
   // The pace line has to fit on the chart too, or it silently runs off.
   const firstISO = rows[0].date, lastISO = rows[rows.length - 1].date;
   const paceEnds = [paceAt(firstISO), paceAt(lastISO)].filter((v) => v != null);
-  for (const v of paceEnds) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  const canPace = paceEnds.length === 2;
+  const showPace = canPace && seriesOn("pace");
+  if (showPace) for (const v of paceEnds) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
   const pad = Math.max((hi - lo) * 0.09, 1.5);
   lo -= pad; hi += pad;
   const Y = (w) => M.t + ih - ((w - lo) / (hi - lo)) * ih;
@@ -317,22 +420,21 @@ function draw() {
 
   // goal reference line
   const lgGoal = $("#lg-goal");
-  if (goalW != null && goalW > lo && goalW < hi) {
+  if (showTarget && goalW > lo && goalW < hi) {
     const y = Y(goalW);
     svg.appendChild(el("line", { class: "goal-line", x1: M.l, x2: W - M.r, y1: y, y2: y }));
     const t = el("text", { class: "goal-label", x: W - M.r, y: y - 7, "text-anchor": "end" });
     t.textContent = `Goal ${lb(goalW)}`;
     svg.appendChild(t);
-    lgGoal.hidden = false;
-  } else {
-    // No line drawn — the goal is off this range's scale — so don't claim
-    // one in the legend.
-    lgGoal.hidden = true;
   }
+  // The legend entry tracks whether there *is* a target, not whether it's
+  // currently drawn — otherwise switching it off would remove the only way
+  // to switch it back on.
+  lgGoal.hidden = !canTarget;
 
   // raw weigh-ins, recessive — the trend line is the signal
   const r = rows.length > 900 ? 1.6 : rows.length > 300 ? 2.1 : 3;
-  const showDots = !state.prefs || state.prefs.dots !== false;
+  const showDots = seriesOn("dots");
   for (const p of showDots ? rows : []) {
     svg.appendChild(el("circle", {
       class: "dot" + (p.memo ? " has-note" : ""),
@@ -343,7 +445,7 @@ function draw() {
   // The goal, drawn as the path it actually implies. Where the blue trend
   // sits against this orange line is the answer to "am I on track?".
   const lgPace = $("#lg-pace");
-  if (paceEnds.length === 2) {
+  if (showPace) {
     const pts = [firstISO, lastISO];
     // A vertex at the target date, where the line flattens out.
     const gt = state.goal.target_date;
@@ -352,10 +454,8 @@ function draw() {
       .map((iso, i) => `${i ? "L" : "M"}${X(iso).toFixed(1)} ${Y(paceAt(iso)).toFixed(1)}`)
       .join("");
     svg.appendChild(el("path", { class: "pace-line", d: dPace }));
-    lgPace.hidden = false;
-  } else {
-    lgPace.hidden = true;
   }
+  lgPace.hidden = !canPace;
 
   // Past goals, as small markers — what you hit, and what you didn't. The
   // current goal already gets the pace/target lines above, so it's skipped
@@ -399,9 +499,12 @@ function draw() {
     dSolid += (pen ? "L" : "M") + x + " " + y + " ";
     pen = true;
   }
-  if (dGap) svg.appendChild(el("path", { class: "trend-gap", d: dGap }));
-  svg.appendChild(el("path", { class: "trend-line", d: dSolid }));
-  $("#lg-gap").hidden = gaps === 0;
+  const showTrend = seriesOn("trend");
+  if (showTrend) {
+    if (dGap) svg.appendChild(el("path", { class: "trend-gap", d: dGap }));
+    svg.appendChild(el("path", { class: "trend-line", d: dSolid }));
+  }
+  $("#lg-gap").hidden = gaps === 0 || !showTrend;
 
   // Body fat %, on its own axis at the right — a percentage and a weight
   // share no units, so forcing them onto one scale would make the
@@ -432,7 +535,7 @@ function draw() {
     }
     svg.appendChild(el("path", { class: "fat-line", d: dFat }));
   }
-  $("#lg-fat").hidden = !showFat;
+  $("#lg-fat").hidden = !canFat;
 
   // interaction layer
   const cross = el("line", { class: "crosshair", y1: M.t, y2: M.t + ih, opacity: 0 });
@@ -442,6 +545,17 @@ function draw() {
   svg.appendChild(el("rect", { x: M.l, y: M.t, width: iw, height: ih, fill: "transparent", "data-hit": "1" }));
 
   scale = { X, Y, rows, cross, focus, M, iw, ih, W };
+  syncLegend();
+}
+
+/** Dim the legend entries whose series is switched off. Runs after every
+ *  draw, so the legend can never disagree with the chart. */
+function syncLegend() {
+  for (const b of document.querySelectorAll("#legend .lg[data-series]")) {
+    const on = seriesOn(b.dataset.series);
+    b.classList.toggle("off", !on);
+    b.setAttribute("aria-pressed", String(on));
+  }
 }
 
 function nearestRow(px) {
@@ -472,6 +586,9 @@ function hover(evt) {
     `<div class="tt-w">${lb(p.weight_lb)} lb</div>` +
     `<div class="tt-t">7-day trend ${lb(p.trend)}</div>` +
     (typeof p.fat_ratio === "number" ? `<div class="tt-f">${p.fat_ratio.toFixed(1)}% body fat</div>` : "") +
+    // Muscle and water are recorded but have nowhere else to surface.
+    (typeof p.muscle_lb === "number" ? `<div class="tt-b">${p.muscle_lb.toFixed(1)} lb muscle</div>` : "") +
+    (typeof p.water_lb === "number" ? `<div class="tt-b">${p.water_lb.toFixed(1)} lb water</div>` : "") +
     (p.memo ? `<div class="tt-m">${escapeHtml(p.memo)}</div>` : "");
   tip.hidden = false;
   const wrap = $(".chart-wrap").getBoundingClientRect();
@@ -479,6 +596,19 @@ function hover(evt) {
   tip.style.left = Math.min(Math.max(cx, 90), wrap.width - 90) + "px";
   tip.style.top = (y / (svg.clientHeight || 340)) * wrap.height + "px";
 }
+/** Clicking a weigh-in points the tiles at it — the fast way to reach a day
+ *  that would take a hundred arrow presses. */
+function pickPoint(evt) {
+  if (!scale) return;
+  const svg = $("#chart");
+  const box = svg.getBoundingClientRect();
+  const px = ((evt.clientX - box.left) / box.width) * scale.W;
+  if (px < scale.M.l - 10 || px > scale.M.l + scale.iw + 10) return;
+  const p = nearestRow(px);
+  const latest = state.entries.length ? state.entries[state.entries.length - 1].date : null;
+  selectDay(p.date === latest ? null : p.date);
+}
+
 function hoverOff() {
   $("#tip").hidden = true;
   if (scale) { scale.cross.setAttribute("opacity", 0); scale.focus.setAttribute("opacity", 0); }
@@ -938,11 +1068,35 @@ function wire() {
   const svg = $("#chart");
   svg.addEventListener("mousemove", hover);
   svg.addEventListener("mouseleave", hoverOff);
+  svg.addEventListener("click", pickPoint);
   svg.addEventListener("touchmove", (e) => { hover(e.touches[0]); }, { passive: true });
   svg.addEventListener("touchend", hoverOff);
 
   let rt;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
+
+  /* The legend doubles as the chart's controls. */
+  $("#legend").addEventListener("click", (ev) => {
+    const b = ev.target.closest(".lg[data-series]");
+    if (!b) return;
+    const name = b.dataset.series;
+    savePrefs({ [name]: !seriesOn(name) });
+    draw();
+  });
+
+  /* Stepping through weigh-ins. */
+  $("#day-prev").addEventListener("click", () => stepDay(-1));
+  $("#day-next").addEventListener("click", () => stepDay(1));
+  $("#day-today").addEventListener("click", () => selectDay(null));
+  document.addEventListener("keydown", (ev) => {
+    // Not while typing, and not while a dialog owns the keyboard.
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    if ($("#settings").open) return;
+    if (ev.key === "ArrowLeft") { ev.preventDefault(); stepDay(-1); }
+    else if (ev.key === "ArrowRight") { ev.preventDefault(); stepDay(1); }
+  });
 
   /* Withings */
   $("#w-form").addEventListener("submit", async (ev) => {
@@ -1061,8 +1215,6 @@ function wire() {
     savePrefs({ range: e.target.value === "all" ? "all" : +e.target.value }));
   $("#p-view").addEventListener("change", (e) => savePrefs({ view: e.target.value }));
   $("#p-theme").addEventListener("change", (e) => { savePrefs({ theme: e.target.value }); draw(); });
-  $("#p-dots").addEventListener("change", (e) => savePrefs({ dots: e.target.checked }));
-  $("#p-fat").addEventListener("change", (e) => { savePrefs({ fat: e.target.checked }); draw(); });
   $("#p-sync").addEventListener("change", (e) => savePrefs({ sync_hours: +e.target.value }));
 
 }
@@ -1177,8 +1329,6 @@ function syncPrefsForm() {
   $("#p-range").value = String(p.range);
   $("#p-view").value = p.view === "table" ? "table" : "chart";
   $("#p-theme").value = p.theme;
-  $("#p-dots").checked = p.dots !== false;
-  $("#p-fat").checked = p.fat !== false;
   $("#p-sync").value = String(p.sync_hours ?? 6);
 }
 

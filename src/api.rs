@@ -164,9 +164,30 @@ async fn del_entry(State(a): State<App>, Path(date): Path<String>) -> ApiResult<
     })
 }
 
-async fn get_stats(State(a): State<App>) -> ApiResult<Json<Stats>> {
+#[derive(Deserialize)]
+pub struct StatsQuery {
+    /// Compute as though this were the most recent day on file.
+    pub as_of: Option<NaiveDate>,
+}
+
+/// Every figure the tiles show, optionally rewound to an earlier day.
+///
+/// `as_of` trims the entry list rather than taking a second route through
+/// the arithmetic, so "what the dashboard said that morning" is produced by
+/// exactly the code that produces today's. A parallel implementation in the
+/// front end would be the obvious alternative and the wrong one — two
+/// versions of a moving average eventually disagree, and the one on screen
+/// is the one nobody checks.
+///
+/// The goal stays the current one: a past weight measured against the
+/// target you're chasing now is the useful reading, not an archaeology of
+/// which target you happened to hold in March.
+async fn get_stats(State(a): State<App>, Query(q): Query<StatsQuery>) -> ApiResult<Json<Stats>> {
     let uid = a.db.active_user_id()?;
-    let e = a.db.entries(uid)?;
+    let mut e = a.db.entries(uid)?;
+    if let Some(d) = q.as_of {
+        e.retain(|x| x.date <= d);
+    }
     Ok(Json(stats::compute(&e, a.db.current_goal(uid)?)))
 }
 

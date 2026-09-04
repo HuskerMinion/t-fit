@@ -94,17 +94,17 @@ def main():
               left)
 
         # ── the toggle ───────────────────────────────────────────────
-        page.evaluate("document.querySelector('#settings').showModal()")
-        page.wait_for_timeout(200)
-        page.uncheck("#p-fat")
-        page.wait_for_timeout(500)
+        # Lives on the legend now, not in Settings. chart_check covers every
+        # series; this just confirms fat follows the same rule.
+        btn = page.locator('#legend .lg[data-series="fat"]')
+        btn.click()
+        page.wait_for_timeout(450)
         check("turning it off removes the line", page.locator("#chart .fat-line").count() == 0)
-        check("and hides the legend entry", page.eval_on_selector("#lg-fat", "e => e.hidden"))
-        page.check("#p-fat")
-        page.wait_for_timeout(500)
+        check("but its legend entry stays, so it can be turned back on",
+              not page.eval_on_selector("#lg-fat", "e => e.hidden"))
+        btn.click()
+        page.wait_for_timeout(450)
         check("turning it back on restores it", page.locator("#chart .fat-line").count() == 1)
-        page.evaluate("document.querySelector('#settings').close()")
-        page.wait_for_timeout(200)
 
         # ── table ────────────────────────────────────────────────────
         page.evaluate("state.view='table'; document.querySelector('#view-table').hidden=false; renderTable();")

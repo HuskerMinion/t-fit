@@ -284,6 +284,39 @@ button:disabled { opacity: .55; cursor: default; }
 }
 .tile.hero .tile-value { font-size: 34px; color: var(--ink); }
 .tile-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+/* Body fat sits beside the weight, deliberately smaller: same morning, same
+   body, but the weight is still the headline. Violet ties it to its line on
+   the chart. */
+.tile-fat {
+  margin-left: 9px; font-size: 17px; font-weight: 600;
+  color: var(--accent-a); letter-spacing: -0.01em;
+}
+
+/* ── stepping back through weigh-ins ─────────────────────────── */
+.daynav {
+  display: flex; align-items: center; gap: 8px;
+  margin: -4px 0 -6px;
+}
+.daynav-btn {
+  width: 30px; height: 30px; flex: none; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  font-size: 16px; line-height: 1; cursor: pointer;
+}
+.daynav-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.daynav-btn:disabled { opacity: .35; cursor: default; }
+.daynav-label {
+  font-size: 12.5px; font-weight: 600; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* Looking at the past should be unmistakable — every tile is describing a
+   day that isn't today, and nothing else on screen would say so. */
+.daynav.past .daynav-label { color: var(--accent-a); }
+.daynav-today {
+  font: inherit; font-size: 12px; color: var(--ink-3);
+  background: none; border: none; text-decoration: underline;
+  cursor: pointer; padding: 0 2px;
+}
+.daynav-today:hover { color: var(--ink); }
 .down { color: var(--good); }
 .up { color: var(--bad); }
 
@@ -309,6 +342,18 @@ button:disabled { opacity: .55; cursor: default; }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 6px; }
 .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
 .swatch { width: 9px; height: 9px; border-radius: 50%; display: block; }
+/* Legend entries are buttons now — clicking one hides its series. They keep
+   the look of labels; only the pointer and the dimmed "off" state give it
+   away, which is the right amount of announcement for a control you find by
+   trying it. */
+.lg[data-series] {
+  font: inherit; color: inherit; background: none; border: none; padding: 0;
+  cursor: pointer; border-radius: 4px;
+}
+.lg[data-series]:hover { color: var(--ink); }
+.lg[data-series]:focus-visible { outline: 2px solid var(--s1); outline-offset: 3px; }
+.lg.off { opacity: .38; }
+.lg.off .swatch { filter: grayscale(1); }
 .swatch.s1 { background: var(--s1); }
 .swatch.s2 { background: var(--s2); }
 .swatch.line { width: 16px; height: 2px; border-radius: 2px; }
@@ -319,6 +364,8 @@ button:disabled { opacity: .55; cursor: default; }
 #chart { display: block; width: 100%; height: 340px; touch-action: pan-y; }
 .grid-line { stroke: var(--line-soft); stroke-width: 1; }
 .axis-text { fill: var(--ink-3); font-size: 11px; font-family: var(--font); }
+/* Points are clickable — they select that day in the tiles. */
+#chart [data-hit] { cursor: pointer; }
 .trend-line { fill: none; stroke: var(--s1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 /* Body fat rides a second axis on the right. Violet keeps it clear of the
    blue weight line and the orange goal pace. */

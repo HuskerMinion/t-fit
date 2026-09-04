@@ -137,11 +137,24 @@
     <p class="form-msg" id="entry-msg" role="status" aria-live="polite"></p>
   </section>
 
+  <!-- ── which day the tiles describe ────────────────────────── -->
+  <!-- Steps weigh-in to weigh-in, not calendar day to calendar day: a date
+       you didn't stand on the scale has nothing to show. Every tile below
+       follows, so the row always means one consistent thing. -->
+  <div class="daynav" id="daynav" hidden>
+    <button type="button" class="daynav-btn" id="day-prev" title="Previous weigh-in (←)" aria-label="Previous weigh-in">‹</button>
+    <span class="daynav-label" id="day-label" role="status" aria-live="polite">—</span>
+    <button type="button" class="daynav-btn" id="day-next" title="Next weigh-in (→)" aria-label="Next weigh-in">›</button>
+    <button type="button" class="daynav-today" id="day-today" hidden>Back to latest</button>
+  </div>
+
   <!-- ── stat tiles ──────────────────────────────────────────── -->
   <section class="tiles" id="tiles" aria-label="Summary">
     <div class="tile hero">
-      <div class="tile-label">Current</div>
-      <div class="tile-value" id="s-current">—</div>
+      <div class="tile-label" id="s-current-label">Current</div>
+      <div class="tile-value">
+        <span id="s-current">—</span><span class="tile-fat" id="s-current-fat" hidden></span>
+      </div>
       <div class="tile-sub" id="s-current-sub">no data yet</div>
     </div>
     <div class="tile">
@@ -190,14 +203,19 @@
     </div>
 
     <div id="view-chart">
+      <!-- The legend is also the control: click an entry to drop that
+           series off the chart, click again to bring it back. Items hide
+           entirely only when there's no such data to draw at all — a
+           toggled-off series stays visible but dimmed, or there'd be no way
+           back. -->
       <div class="legend" id="legend">
-        <span class="lg"><i class="swatch s1"></i>Daily weigh-in</span>
-        <span class="lg"><i class="swatch s1 line"></i>7-day trend</span>
-        <span class="lg" id="lg-gap" hidden><i class="swatch s1 line dash"></i>No weigh-ins</span>
-        <span class="lg" id="lg-pace" hidden><i class="swatch s2 line solid"></i>Goal pace</span>
-        <span class="lg" id="lg-goal" hidden><i class="swatch s2 line"></i>Target</span>
-        <span class="lg" id="lg-fat" hidden><i class="swatch acc line"></i>Body fat %</span>
-        <span class="lg"><i class="swatch note"></i>Has a note</span>
+        <button type="button" class="lg" data-series="dots"><i class="swatch s1"></i>Daily weigh-in</button>
+        <button type="button" class="lg" data-series="trend"><i class="swatch s1 line"></i>7-day trend</button>
+        <span class="lg static" id="lg-gap" hidden><i class="swatch s1 line dash"></i>No weigh-ins</span>
+        <button type="button" class="lg" data-series="pace" id="lg-pace" hidden><i class="swatch s2 line solid"></i>Goal pace</button>
+        <button type="button" class="lg" data-series="target" id="lg-goal" hidden><i class="swatch s2 line"></i>Target</button>
+        <button type="button" class="lg" data-series="fat" id="lg-fat" hidden><i class="swatch acc line"></i>Body fat %</button>
+        <span class="lg static"><i class="swatch note"></i>Has a note</span>
       </div>
       <div class="chart-wrap">
         <svg id="chart" role="img" aria-label="Line chart of body weight over time"></svg>
@@ -290,17 +308,10 @@
         </select>
       </label>
 
-      <label class="pref" for="p-fat">
-        <span class="pref-label">Show body fat %
-          <small>A second line, on its own axis — only when a scale has measured it</small></span>
-        <input type="checkbox" id="p-fat">
-      </label>
-
-      <label class="pref" for="p-dots">
-        <span class="pref-label">Show individual weigh-ins
-          <small>Faint dots behind the trend line</small></span>
-        <input type="checkbox" id="p-dots">
-      </label>
+      <p class="pref-note">
+        Which lines the chart draws is set on the chart itself — click any
+        entry in its legend to show or hide that series.
+      </p>
     </section>
 
     <section class="pref-group">
