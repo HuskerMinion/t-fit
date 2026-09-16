@@ -1,5 +1,7 @@
 # t-fit
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/huskerminion)
+
 A small, fast, local-first weight tracker — the part of [FitDay PC](https://en.wikipedia.org/wiki/FitDay) that people actually used, rebuilt in Rust and still working in 2026.
 
 FitDay PC was abandoned around 2004 and its online service shut down in 2022. It has no export. If you kept a decade of weigh-ins in it, that data is stuck inside a proprietary binary on a machine running an app that no longer gets updates. t-fit is the way out: one small binary, one SQLite file, a CSV export that works, and an optional Withings sync so a smart scale can keep it fed.
